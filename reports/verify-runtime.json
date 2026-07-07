@@ -1,0 +1,89 @@
+{
+  "url": "http://127.0.0.1:5174/",
+  "results": [
+    {
+      "viewport": {
+        "name": "desktop",
+        "width": 1280,
+        "height": 720
+      },
+      "state": {
+        "title": "SkiFree",
+        "ready": true,
+        "paused": false,
+        "hudText": "SkiFree\nTime:\n0:00:00.94\nDist:\n13m\nSpeed:\n14.27m/s\nStyle:\n0",
+        "canvas": {
+          "cssWidth": 1280,
+          "cssHeight": 720,
+          "width": 1280,
+          "height": 720,
+          "simulationFps": "60"
+        },
+        "hud": {
+          "left": 1120,
+          "right": 1270,
+          "top": 10,
+          "bottom": 119.25
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 720
+        },
+        "webgl": true,
+        "centerPixel": [
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "pixels": {
+        "nonSnow": 8050,
+        "total": 921600,
+        "ratio": 0.008734809027777778
+      }
+    },
+    {
+      "viewport": {
+        "name": "mobile",
+        "width": 390,
+        "height": 844
+      },
+      "state": {
+        "title": "SkiFree",
+        "ready": true,
+        "paused": false,
+        "hudText": "SkiFree\nTime:\n0:00:00.89\nDist:\n12m\nSpeed:\n14.25m/s\nStyle:\n0",
+        "canvas": {
+          "cssWidth": 390,
+          "cssHeight": 844,
+          "width": 390,
+          "height": 844,
+          "simulationFps": "60"
+        },
+        "hud": {
+          "left": 252,
+          "right": 384,
+          "top": 6,
+          "bottom": 112
+        },
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "webgl": true,
+        "centerPixel": [
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "pixels": {
+        "nonSnow": 9399,
+        "total": 329160,
+        "ratio": 0.028554502369668246
+      }
+    }
+  ]
+}
