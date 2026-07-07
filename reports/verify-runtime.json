@@ -11,7 +11,7 @@
         "title": "SkiFree",
         "ready": true,
         "paused": false,
-        "hudText": "SkiFree\nTime:\n0:00:00.94\nDist:\n13m\nSpeed:\n14.27m/s\nStyle:\n0",
+        "hudText": "SkiFree\nTime:\n0:00:00.96\nDist:\n13m\nSpeed:\n14.28m/s\nStyle:\n0",
         "canvas": {
           "cssWidth": 1280,
           "cssHeight": 720,
@@ -30,6 +30,15 @@
           "height": 720
         },
         "webgl": true,
+        "effects": {
+          "cameraPerspective": true,
+          "cameraMode": "perspective-depth",
+          "cameraDepthRange": 90,
+          "snowParticles": 520,
+          "snowFieldWidth": 2112,
+          "snowFieldHeight": 1188,
+          "skiTrackMaxSegments": 560
+        },
         "centerPixel": [
           0,
           0,
@@ -38,9 +47,9 @@
         ]
       },
       "pixels": {
-        "nonSnow": 8050,
+        "nonSnow": 9236,
         "total": 921600,
-        "ratio": 0.008734809027777778
+        "ratio": 0.010021701388888889
       }
     },
     {
@@ -53,7 +62,7 @@
         "title": "SkiFree",
         "ready": true,
         "paused": false,
-        "hudText": "SkiFree\nTime:\n0:00:00.89\nDist:\n12m\nSpeed:\n14.25m/s\nStyle:\n0",
+        "hudText": "SkiFree\nTime:\n0:00:00.93\nDist:\n12m\nSpeed:\n14.27m/s\nStyle:\n0",
         "canvas": {
           "cssWidth": 390,
           "cssHeight": 844,
@@ -72,6 +81,15 @@
           "height": 844
         },
         "webgl": true,
+        "effects": {
+          "cameraPerspective": true,
+          "cameraMode": "perspective-depth",
+          "cameraDepthRange": 90,
+          "snowParticles": 520,
+          "snowFieldWidth": 643.5,
+          "snowFieldHeight": 1392.6,
+          "skiTrackMaxSegments": 560
+        },
         "centerPixel": [
           0,
           0,
@@ -80,9 +98,9 @@
         ]
       },
       "pixels": {
-        "nonSnow": 9399,
+        "nonSnow": 11966,
         "total": 329160,
-        "ratio": 0.028554502369668246
+        "ratio": 0.036353141329444644
       }
     }
   ]

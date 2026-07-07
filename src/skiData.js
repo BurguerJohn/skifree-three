@@ -51,16 +51,26 @@ export const OBJECT_KIND = Object.freeze({
   RAMP: 14,
   SIGN: 15,
   FIRE: 16,
-  PATCH: 17
+  PATCH: 17,
+  TOWER: 18
 });
 
 export const SPRITE = Object.freeze({
   FLAG_RED: 23,
   FLAG_BLUE: 24,
+  NPC_SKIER_1: 28,
+  NPC_SKIER_2: 29,
+  NPC_SKIER_3: 30,
+  DOG_LEFT: 33,
+  DOG_RIGHT: 34,
+  DOG_WOOF_LEFT: 35,
+  DOG_WOOF_RIGHT: 36,
   ROCK: 45,
   STUMP: 46,
   TRACK_LEFT: 47,
   TRACK_RIGHT: 48,
+  RAMP_1: 52,
+  RAMP_2: 52,
   TREE_SMALL: 49,
   TREE_DEAD: 50,
   TREE_LARGE: 51,
@@ -72,6 +82,10 @@ export const SPRITE = Object.freeze({
   SLALOM_SIGN: 61,
   TREE_SLALOM_SIGN: 62,
   FREESTYLE_SIGN: 63,
+  SKI_LIFT_TOWER: 64,
+  SKI_LIFT_CHAIR_1: 65,
+  SKI_LIFT_CHAIR_2: 66,
+  SKI_LIFT_CHAIR_3: 67,
   YELLOW_PATCH: 82,
   FIRE_FIRST: 83
 });
