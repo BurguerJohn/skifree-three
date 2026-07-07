@@ -11,7 +11,7 @@
         "title": "SkiFree",
         "ready": true,
         "paused": false,
-        "hudText": "SkiFree\nTime:\n0:00:00.96\nDist:\n13m\nSpeed:\n14.28m/s\nStyle:\n0",
+        "hudText": "SkiFree\nTime:\n0:00:00.94\nDist:\n13m\nSpeed:\n14.27m/s\nStyle:\n0",
         "canvas": {
           "cssWidth": 1280,
           "cssHeight": 720,
@@ -47,9 +47,9 @@
         ]
       },
       "pixels": {
-        "nonSnow": 9236,
+        "nonSnow": 9261,
         "total": 921600,
-        "ratio": 0.010021701388888889
+        "ratio": 0.010048828125
       }
     },
     {
@@ -62,7 +62,7 @@
         "title": "SkiFree",
         "ready": true,
         "paused": false,
-        "hudText": "SkiFree\nTime:\n0:00:00.93\nDist:\n12m\nSpeed:\n14.27m/s\nStyle:\n0",
+        "hudText": "SkiFree\nTime:\n0:00:00.91\nDist:\n12m\nSpeed:\n14.26m/s\nStyle:\n0",
         "canvas": {
           "cssWidth": 390,
           "cssHeight": 844,

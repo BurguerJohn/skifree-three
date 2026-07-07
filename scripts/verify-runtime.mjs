@@ -295,6 +295,15 @@ async function verifyCourseContent(page) {
       towers: game.objects.filter((object) => object.kind === 18 && object.spriteId === 64).length
     };
 
+    for (const object of game.objects) game.removeSprite(object);
+    game.objects = [];
+    game.spawnChunk(2160);
+    game.spawnChunk(2200);
+    game.spawnChunk(2280);
+    const earlyFinishSigns = game.objects
+      .filter((object) => object.kind === 15 && (object.spriteId === 59 || object.spriteId === 60) && object.y < game.courseModes.race.finishY)
+      .map((object) => ({ spriteId: object.spriteId, x: object.x, y: object.y }));
+
     game.restart();
     const styleBefore = game.styleScore;
     game.addStyleScore(7);
@@ -352,6 +361,34 @@ async function verifyCourseContent(page) {
     };
 
     game.restart();
+    game.input.pointerActive = false;
+    game.player.x = game.courseModes.race.signX;
+    game.player.y = 638;
+    game.player.speed = 4;
+    game.update(0.04);
+    const missedGate = game.courseModes.race.gates[0];
+    const wrongSideStyleBefore = game.styleScore;
+    const wrongSideEffectsBefore = game.gateEffects.length;
+    game.player.x = missedGate.flagX - 120;
+    game.player.y = missedGate.y - 2;
+    game.player.speed = 4;
+    game.update(0.04);
+    const gateWrongSide = {
+      passed: missedGate.passed,
+      missed: missedGate.missed,
+      styleAwarded: missedGate.styleAwarded,
+      feedbackCorrectSide: missedGate.feedbackCorrectSide,
+      styleBefore: wrongSideStyleBefore,
+      styleAfter: game.styleScore,
+      effectCountBefore: wrongSideEffectsBefore,
+      effectCountAfter: game.gateEffects.length,
+      missedGates: game.courseModes.race.missedGates,
+      penaltyMs: game.courseModes.race.penaltyMs,
+      lastGateStyleAward: game.lastGateStyleAward,
+      effectPosition: game.gateEffects[0]?.group.position.toArray() || null
+    };
+
+    game.restart();
     for (const object of game.objects) game.removeSprite(object);
     game.objects = [];
     const dog = game.addDog(0, 900);
@@ -386,12 +423,14 @@ async function verifyCourseContent(page) {
     return {
       flagChecks,
       spawned,
+      earlyFinishSigns,
       styleBefore,
       styleAfterManual,
       styleAfterRamp,
       hudStyle,
       rampCollision,
       gatePass,
+      gateWrongSide,
       dogAfter,
       npcStart,
       npcAfter
@@ -409,6 +448,9 @@ async function verifyCourseContent(page) {
   }
   if (result.spawned.badRampSprites.length > 0) {
     throw new Error(`ramps used sprites other than bitmap 52: ${JSON.stringify(result.spawned)}`);
+  }
+  if (result.earlyFinishSigns.length > 0) {
+    throw new Error(`finish signs spawned before the real finish: ${JSON.stringify(result.earlyFinishSigns)}`);
   }
   if (result.styleAfterManual !== result.styleBefore + 7) {
     throw new Error(`style points did not count outside freestyle: ${JSON.stringify(result)}`);
@@ -437,6 +479,20 @@ async function verifyCourseContent(page) {
     || !result.gatePass.effectPosition
   ) {
     throw new Error(`correct gate side did not award style/effect: ${JSON.stringify(result.gatePass)}`);
+  }
+  if (
+    result.gateWrongSide.passed
+    || !result.gateWrongSide.missed
+    || !result.gateWrongSide.styleAwarded
+    || result.gateWrongSide.feedbackCorrectSide !== false
+    || result.gateWrongSide.lastGateStyleAward <= 0
+    || result.gateWrongSide.styleAfter !== result.gateWrongSide.styleBefore + result.gateWrongSide.lastGateStyleAward
+    || result.gateWrongSide.effectCountAfter <= result.gateWrongSide.effectCountBefore
+    || result.gateWrongSide.missedGates !== 1
+    || result.gateWrongSide.penaltyMs !== 5000
+    || !result.gateWrongSide.effectPosition
+  ) {
+    throw new Error(`wrong gate side did not award style/effect while keeping penalty: ${JSON.stringify(result.gateWrongSide)}`);
   }
   const dogWalkingFrames = result.dogAfter.frames.filter((frame) => frame.state === 0x1b || frame.state === 0x1c);
   const dogUsedAlertWhileWalking = dogWalkingFrames.some((frame) => frame.spriteId === 35 || frame.spriteId === 36);

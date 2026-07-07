@@ -61,6 +61,8 @@ const NPC_SKIER_MOTION = Object.freeze({
   [0x18]: { targetVx: 0.42, targetSpeed: 3.05 }
 });
 const GATE_PASS_STYLE_POINTS = 12;
+const GATE_WRONG_SIDE_STYLE_POINTS = 6;
+const GATE_SIDE_FEEDBACK_RADIUS = 150;
 const GATE_PASS_EFFECT_SECONDS = 0.7;
 const GATE_PASS_EFFECT_PARTICLES = 18;
 const YETI_ATTACK_SECONDS = 1.7;
@@ -548,13 +550,20 @@ class SkiFreeGame {
     return Array.from({ length: count }, (_, index) => {
       const drift = index % 2 === 0 ? -30 : 30;
       const x = centerX + drift;
+      const left = x - halfWidth;
+      const right = x + halfWidth;
+      const isLeftFlag = index % 2 === 0;
       return {
         x,
         y: startY + index * stepY,
-        left: x - halfWidth,
-        right: x + halfWidth,
+        left,
+        right,
+        flagX: isLeftFlag ? left : right,
+        isLeftFlag,
         passed: false,
-        missed: false
+        missed: false,
+        styleAwarded: false,
+        feedbackAwarded: false
       };
     });
   }
@@ -593,11 +602,11 @@ class SkiFreeGame {
   }
 
   addGateSprite(gate, index) {
-    const isLeft = index % 2 === 0;
+    const isLeft = gate.isLeftFlag ?? index % 2 === 0;
     this.addObject({
       kind: OBJECT_KIND.MARKER,
       spriteId: isLeft ? SPRITE.FLAG_RED : SPRITE.FLAG_BLUE,
-      x: isLeft ? gate.left : gate.right,
+      x: gate.flagX ?? (isLeft ? gate.left : gate.right),
       y: gate.y,
       collidable: false
     });
@@ -641,6 +650,7 @@ class SkiFreeGame {
 
     this.applyPointerState();
     this.integratePlayer(scaledDt);
+    this.checkGateStyleFeedback(previousPlayer);
     this.updateCourseModes(previousPlayer, scaledDt);
     this.updateGatePassEffects(scaledDt);
     this.updateCourseObjects(scaledDt);
@@ -733,6 +743,7 @@ class SkiFreeGame {
       gate.passed = false;
       gate.missed = false;
       gate.styleAwarded = false;
+      gate.feedbackAwarded = false;
     });
     this.courseMessage = `${mode.label} started`;
   }
@@ -756,11 +767,6 @@ class SkiFreeGame {
       const crossingX = this.xAtY(previousPlayer, this.player, gate.y);
       if (crossingX >= gate.left && crossingX <= gate.right) {
         gate.passed = true;
-        gate.styleAwarded = true;
-        this.addStyleScore(GATE_PASS_STYLE_POINTS);
-        this.lastGateStyleAward = GATE_PASS_STYLE_POINTS;
-        this.gatePassCount += 1;
-        this.spawnGatePassEffect(crossingX, gate.y);
       } else {
         gate.missed = true;
         mode.missedGates += 1;
@@ -768,6 +774,36 @@ class SkiFreeGame {
       }
       mode.nextGate += 1;
     }
+  }
+
+  checkGateStyleFeedback(previousPlayer) {
+    for (const mode of [this.courseModes.race, this.courseModes.treeSlalom]) {
+      for (const gate of mode.gates) {
+        if (gate.feedbackAwarded || !this.crossedY(previousPlayer.y, this.player.y, gate.y)) continue;
+        const crossingX = this.xAtY(previousPlayer, this.player, gate.y);
+        if (!this.isNearGateFlag(gate, crossingX)) continue;
+        this.awardGateStyleFeedback(gate, crossingX);
+      }
+    }
+  }
+
+  isNearGateFlag(gate, crossingX) {
+    return Math.abs(crossingX - gate.flagX) <= GATE_SIDE_FEEDBACK_RADIUS
+      || (crossingX >= gate.left && crossingX <= gate.right);
+  }
+
+  awardGateStyleFeedback(gate, crossingX) {
+    const correctSide = crossingX >= gate.left && crossingX <= gate.right;
+    const stylePoints = correctSide ? GATE_PASS_STYLE_POINTS : GATE_WRONG_SIDE_STYLE_POINTS;
+    gate.feedbackAwarded = true;
+    gate.styleAwarded = true;
+    gate.feedbackCorrectSide = correctSide;
+    gate.feedbackX = crossingX;
+    gate.feedbackPoints = stylePoints;
+    this.addStyleScore(stylePoints);
+    this.lastGateStyleAward = stylePoints;
+    this.gatePassCount += 1;
+    this.spawnGatePassEffect(crossingX, gate.y, correctSide);
   }
 
   crossedY(previousY, currentY, targetY) {
@@ -785,12 +821,12 @@ class SkiFreeGame {
     this.styleScore += amount;
   }
 
-  spawnGatePassEffect(x, y) {
+  spawnGatePassEffect(x, y, correctSide = true) {
     const group = new THREE.Group();
     group.position.set(x, -y, CAMERA_PLAYER_DEPTH + 10);
 
     const ringMaterial = new THREE.MeshBasicMaterial({
-      color: 0x008cff,
+      color: correctSide ? 0x008cff : 0xff4d2e,
       transparent: true,
       opacity: 0.82,
       depthTest: false,
@@ -825,7 +861,7 @@ class SkiFreeGame {
     const particleGeometry = new THREE.BufferGeometry();
     particleGeometry.setAttribute("position", new THREE.BufferAttribute(particlePositions, 3));
     const particleMaterial = new THREE.PointsMaterial({
-      color: 0x005dff,
+      color: correctSide ? 0x005dff : 0xff2a00,
       size: 4.8,
       transparent: true,
       opacity: 0.9,
@@ -1270,11 +1306,6 @@ class SkiFreeGame {
 
   spawnChunk(y) {
     if (y < 120) return;
-
-    if (Math.abs(y - 2200) < COURSE_STEP / 2) {
-      this.addObject({ kind: OBJECT_KIND.SIGN, spriteId: SPRITE.FINISH_LEFT, x: -70, y, collidable: false });
-      this.addObject({ kind: OBJECT_KIND.SIGN, spriteId: SPRITE.FINISH_RIGHT, x: 70, y, collidable: false });
-    }
 
     const count = this.rng.int(3, y > 1000 ? 7 : 5);
     const halfWidth = Math.max(360, this.viewport.width * 0.62);
