@@ -1,7 +1,7 @@
 :root {
   color-scheme: light;
   font-family: "MS Sans Serif", Tahoma, Arial, sans-serif;
-  background: #f7f8f4;
+  background: #ffffff;
   color: #151515;
 }
 
@@ -19,7 +19,7 @@ body,
 }
 
 body {
-  background: #f7f8f4;
+  background: #ffffff;
 }
 
 #app {
@@ -31,7 +31,39 @@ body {
   width: 100%;
   height: 100%;
   image-rendering: pixelated;
-  background: #f7f8f4;
+  background: #ffffff;
+}
+
+#style-effects {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.style-popup {
+  position: absolute;
+  left: 50%;
+  top: 31%;
+  color: #1758ad;
+  font-size: clamp(16px, 2.2vw, 24px);
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  text-shadow: 1px 1px 0 #fff, -1px -1px 0 #fff, 0 2px 0 rgba(255, 255, 255, 0.9);
+  animation: style-score-pop 1.05s cubic-bezier(0.2, 0.8, 0.25, 1) forwards;
+  will-change: transform, opacity;
+}
+
+@keyframes style-score-pop {
+  0% { opacity: 0; transform: translate(-50%, 8px) scale(0.65) rotate(-3deg); }
+  18% { opacity: 1; transform: translate(-50%, -5px) scale(1.16) rotate(1deg); }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--drift)), -72px) scale(0.94); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .style-popup { animation-duration: 0.35s; }
 }
 
 #hud {

@@ -98,6 +98,7 @@ async function inspectPage(page, viewportName) {
       webgl: Boolean(gl),
       effects: {
         cameraPerspective: window.skiFreeGame?.camera?.isPerspectiveCamera === true,
+        cameraOrthographic: window.skiFreeGame?.camera?.isOrthographicCamera === true,
         cameraMode: canvas.dataset.cameraMode,
         cameraDepthRange: Number(canvas.dataset.cameraDepthRange || 0),
         snowParticles: window.skiFreeGame?.snow?.count || Number(canvas.dataset.snowParticles || 0),
@@ -114,20 +115,16 @@ async function inspectPage(page, viewportName) {
   if (state.canvas.simulationFps !== "60") {
     throw new Error(`${viewportName}: expected 60 FPS simulation, got ${state.canvas.simulationFps}`);
   }
-  if (!state.effects.cameraPerspective || state.effects.cameraMode !== "perspective-depth") {
-    throw new Error(`${viewportName}: depth camera effect is not active`);
+  if (!state.effects.cameraOrthographic || state.effects.cameraMode !== "orthographic-2d") {
+    throw new Error(`${viewportName}: source-faithful orthographic camera is not active`);
   }
-  if (state.effects.cameraDepthRange <= 0) {
-    throw new Error(`${viewportName}: depth range was not exposed`);
+  if (state.effects.cameraDepthRange !== 0) {
+    throw new Error(`${viewportName}: unexpected camera depth range`);
   }
-  if (state.effects.snowParticles < 300) {
-    throw new Error(`${viewportName}: snow particle system is not active`);
-  }
-  if (state.effects.snowFieldWidth < state.viewport.width * 1.5 || state.effects.snowFieldHeight < state.viewport.height * 1.5) {
-    throw new Error(`${viewportName}: snow field does not cover the viewport with margin`);
-  }
-  if (state.effects.skiTrackMaxSegments < 300) {
-    throw new Error(`${viewportName}: ski track mesh is not configured`);
+  if (state.effects.snowParticles < 300
+    || state.effects.snowFieldWidth < state.viewport.width
+    || state.effects.snowFieldHeight < state.viewport.height) {
+    throw new Error(`${viewportName}: snow field does not cover the viewport`);
   }
   if (!state.hudText.includes("Time:") || !state.hudText.includes("Style:")) {
     throw new Error(`${viewportName}: HUD text missing expected status rows`);
@@ -154,7 +151,7 @@ async function verifyControls(page) {
   });
   await page.keyboard.press("ArrowLeft");
   const leftState = await page.locator("#game").getAttribute("data-player-state");
-  if (leftState !== "4") throw new Error(`ArrowLeft mapped to state ${leftState}, expected 4`);
+  if (leftState !== "1") throw new Error(`ArrowLeft mapped to state ${leftState}, expected 1`);
 
   await page.evaluate(() => {
     window.skiFreeGame.restart();
@@ -162,7 +159,63 @@ async function verifyControls(page) {
   });
   await page.keyboard.press("ArrowRight");
   const rightState = await page.locator("#game").getAttribute("data-player-state");
-  if (rightState !== "1") throw new Error(`ArrowRight mapped to state ${rightState}, expected 1`);
+  if (rightState !== "4") throw new Error(`ArrowRight mapped to state ${rightState}, expected 4`);
+
+  const braking = await page.evaluate(() => {
+    const game = window.skiFreeGame;
+    game.restart();
+    game.input.pointerActive = false;
+    game.setPlayerState(3);
+    for (let i = 0; i < 240; i += 1) game.integratePlayer(1 / 60);
+    return { speed: game.player.speed, vx: game.player.vx };
+  });
+  if (braking.speed > 0.05 || Math.abs(braking.vx) > 0.1) {
+    throw new Error(`hard turn did not brake both motion axes: ${JSON.stringify(braking)}`);
+  }
+
+  const mouseAxes = await page.evaluate(() => {
+    const game = window.skiFreeGame;
+    game.restart();
+    const anchorX = game.viewport.width / 2;
+    const anchorY = game.viewport.height / 3;
+    game.input.pointerActive = true;
+    game.input.pointerX = anchorX;
+    game.input.pointerY = anchorY + 100;
+    game.applyPointerState();
+    const below = game.player.state;
+    game.input.pointerX = anchorX - 100;
+    game.input.pointerY = anchorY;
+    game.applyPointerState();
+    const left = game.player.state;
+    game.input.pointerX = anchorX + 100;
+    game.applyPointerState();
+    const right = game.player.state;
+
+    game.launchTrick(15);
+    game.input.pointerX = anchorX;
+    game.input.pointerY = anchorY + 100;
+    game.applyNavigationKey({ code: "Space" });
+    game.applyPointerState();
+    return {
+      below,
+      left,
+      right,
+      airState: game.player.state,
+      airMode: game.player.mode,
+      actionTimer: game.player.actionTimer,
+      manualTrickTimer: game.player.manualTrickTimer
+    };
+  });
+  if (
+    mouseAxes.below !== 0 || mouseAxes.left !== 3 || mouseAxes.right !== 6
+    || mouseAxes.airState !== 18 || mouseAxes.airMode <= 0
+    || mouseAxes.actionTimer <= 0 || mouseAxes.manualTrickTimer <= 0
+  ) throw new Error(`mouse axes or airborne tricks are incorrect: ${JSON.stringify(mouseAxes)}`);
+
+  await page.evaluate(() => {
+    window.skiFreeGame.restart();
+    window.skiFreeGame.input.pointerActive = false;
+  });
 
   await page.keyboard.press("Space");
   await page.waitForFunction(() => {
@@ -194,6 +247,115 @@ async function verifyControls(page) {
   }
 }
 
+async function verifyModernEffects(page) {
+  const result = await page.evaluate(() => {
+    const game = window.skiFreeGame;
+    game.restart();
+    game.input.pointerActive = false;
+
+    const acrobat = game.spawnTopAcrobat();
+    const acrobatOffset = acrobat.y - game.player.y;
+
+    for (let i = 0; i < 45; i += 1) {
+      game.player.y += 6;
+      game.updateSkiTracks();
+    }
+    const groundedSegments = game.skiTracks.segments;
+    game.player.actionTimer = 0.5;
+    game.player.airHeight = 18;
+    game.player.y += 30;
+    game.updateSkiTracks();
+    const airborneSegments = game.skiTracks.segments;
+
+    game.courseModes.freestyle.active = true;
+    const styleBefore = game.styleScore;
+    game.addStyleScore(9, "Trick");
+    game.updatePlayerShadow();
+    game.syncPlayerDataset();
+
+    return {
+      acrobatOffset,
+      viewportHeight: game.viewport.height,
+      groundedSegments,
+      airborneSegments,
+      trackDrawCount: game.skiTracks.geometry.drawRange.count,
+      snowCount: game.snow.count,
+      snowFieldWidth: game.snow.fieldWidth,
+      snowFieldHeight: game.snow.fieldHeight,
+      styleBefore,
+      styleAfter: game.styleScore,
+      popupText: document.querySelector(".style-popup")?.textContent || "",
+      popupCount: Number(game.canvas.dataset.styleEffectCount || 0),
+      shadowOpacity: game.playerShadow.material.opacity
+    };
+  });
+
+  if (result.acrobatOffset >= -result.viewportHeight * 0.35) {
+    throw new Error(`acrobat did not spawn beyond the top edge: ${JSON.stringify(result)}`);
+  }
+  if (result.groundedSegments < 30 || result.trackDrawCount !== result.groundedSegments * 4) {
+    throw new Error(`ski tracks were not recorded correctly: ${JSON.stringify(result)}`);
+  }
+  if (result.airborneSegments !== result.groundedSegments) {
+    throw new Error(`ski tracks continued while airborne: ${JSON.stringify(result)}`);
+  }
+  if (result.snowCount < 300 || result.snowFieldWidth < 800 || result.snowFieldHeight < 600) {
+    throw new Error(`snow system is undersized: ${JSON.stringify(result)}`);
+  }
+  if (result.styleAfter !== result.styleBefore + 9 || !result.popupText.includes("+9") || result.popupCount < 1) {
+    throw new Error(`style feedback did not appear: ${JSON.stringify(result)}`);
+  }
+  if (!(result.shadowOpacity > 0 && result.shadowOpacity < 0.2)) {
+    throw new Error(`airborne shadow did not react to jump height: ${JSON.stringify(result)}`);
+  }
+}
+
+async function verifyPlayerRivals(page) {
+  const result = await page.evaluate(() => {
+    const game = window.skiFreeGame;
+    game.restart();
+    game.input.pointerActive = false;
+    const rivals = game.objects.filter((object) => object.kind === "rival-player");
+    const rival = rivals[0];
+    const initialGap = -game.viewport.height * 0.9;
+    rival.y = game.player.y + initialGap;
+    for (let i = 0; i < 240; i += 1) {
+      game.player.y += game.player.speed;
+      game.elapsedMs += 1000 / 60;
+      game.updatePlayerRival(rival, 1 / 60);
+    }
+    const recoveredGap = rival.y - game.player.y;
+    const scoreBefore = rival.styleScore;
+    game.startRivalTrick(rival, true);
+    const airborneState = rival.state;
+    for (let i = 0; i < 60; i += 1) game.updatePlayerRival(rival, 1 / 60);
+    game.syncPlayerDataset();
+    return {
+      count: rivals.length,
+      allNamed: rivals.every((item) => item.name && item.nameSprite && item.nameCanvas),
+      initialGap,
+      recoveredGap,
+      speed: rival.speed,
+      airborneState,
+      scoreBefore,
+      scoreAfter: rival.styleScore,
+      tagTextHasScore: rival.nameCanvas.getContext("2d").getImageData(0, 0, rival.nameCanvas.width, rival.nameCanvas.height).data.some((value) => value !== 0),
+      datasetCount: Number(game.canvas.dataset.rivalCount || 0),
+      datasetScores: game.canvas.dataset.rivalScores
+    };
+  });
+
+  if (result.count !== 3 || result.datasetCount !== 3 || !result.allNamed || !result.tagTextHasScore) {
+    throw new Error(`player-clone rivals or nametags are missing: ${JSON.stringify(result)}`);
+  }
+  if (Math.abs(result.recoveredGap) >= Math.abs(result.initialGap) * 0.5) {
+    throw new Error(`rival rubberband did not recover the gap: ${JSON.stringify(result)}`);
+  }
+  if (result.airborneState < 13 || result.scoreAfter <= result.scoreBefore || !result.datasetScores) {
+    throw new Error(`rival aerial trick/style score failed: ${JSON.stringify(result)}`);
+  }
+}
+
 async function verifyCourseModes(page) {
   const result = await page.evaluate(() => {
     const game = window.skiFreeGame;
@@ -222,7 +384,7 @@ async function verifyCourseModes(page) {
     tick();
     const raceStarted = game.courseModes.race.active;
     const firstGate = game.courseModes.race.gates[0];
-    game.player.x = firstGate.left - 120;
+    game.player.x = firstGate.flagX + 120;
     game.player.y = firstGate.y - 2;
     game.player.speed = 4;
     tick();
@@ -549,6 +711,235 @@ async function verifyCourseContent(page) {
   });
 }
 
+async function verifyRecoveredCourseContent(page) {
+  const result = await page.evaluate(() => {
+    const game = window.skiFreeGame;
+    const removeAllObjects = () => {
+      for (const object of game.objects) game.removeSprite(object);
+      game.objects = [];
+    };
+
+    game.restart();
+    game.input.pointerActive = false;
+    const race = game.courseModes.race;
+    const tree = game.courseModes.treeSlalom;
+    const alphaAt = (spriteId, x, y) => {
+      const canvas = game.assets.textures.get(spriteId).image;
+      return canvas.getContext("2d").getImageData(x, y, 1, 1).data[3];
+    };
+    const courseLayout = {
+      raceGateCount: race.gates.length,
+      treeGateCount: tree.gates.length,
+      raceFirst: { y: race.gates[0].y, x: race.gates[0].flagX, spriteId: race.gates[0].spriteId },
+      raceSecond: { y: race.gates[1].y, x: race.gates[1].flagX, spriteId: race.gates[1].spriteId },
+      raceLastY: race.gates.at(-1).y,
+      treeFirst: { y: tree.gates[0].y, x: tree.gates[0].flagX, spriteId: tree.gates[0].spriteId },
+      treeSecond: { y: tree.gates[1].y, x: tree.gates[1].flagX, spriteId: tree.gates[1].spriteId },
+      treeLastY: tree.gates.at(-1).y,
+      gateMarkersValid: [...race.gates, ...tree.gates].every((gate) => (
+        gate.marker?.kind === 11
+        && gate.marker.spriteId === gate.spriteId
+        && gate.marker.x === gate.flagX
+        && gate.marker.y === gate.y
+      )),
+      introSprites: [53, 54, 55, 56].map((spriteId) => game.objects.filter((object) => object.spriteId === spriteId).length),
+      modeSigns: [61, 62, 63].map((spriteId) => game.objects.filter((object) => object.spriteId === spriteId).length),
+      startLeft: game.objects.filter((object) => object.spriteId === 57 && object.y === 0x280).length,
+      startRight: game.objects.filter((object) => object.spriteId === 58 && object.y === 0x280).length,
+      liftTowers: game.objects.filter((object) => object.spriteId === 64).length,
+      liftChairs: game.objects.filter((object) => object.kind === 4 && object.spriteId >= 65 && object.spriteId <= 67).length,
+      anchoredAtBottom: game.player.sprite.center.y === 0 && game.boundsFor(game.player).bottom === game.player.y,
+      whiteMaskTransparent: alphaAt(23, 5, 10) === 0,
+      blackFlagOutlineOpaque: alphaAt(23, 0, 10) === 255,
+      coloredRampCornerOpaque: alphaAt(52, 0, 0) === 255
+    };
+
+    game.player.x = race.signX;
+    game.player.y = 638;
+    game.player.speed = 4;
+    game.update(0.04);
+    const passGate = race.gates[0];
+    const styleBeforePass = game.styleScore;
+    game.player.x = passGate.flagX - 20;
+    game.player.y = passGate.y - 2;
+    game.player.speed = 4;
+    game.update(0.04);
+    const gatePass = {
+      passed: passGate.passed,
+      missed: passGate.missed,
+      markerSprite: passGate.marker.spriteId,
+      styleBefore: styleBeforePass,
+      styleAfter: game.styleScore,
+      passCount: game.gatePassCount
+    };
+
+    game.restart();
+    game.input.pointerActive = false;
+    game.player.x = game.courseModes.race.signX;
+    game.player.y = 638;
+    game.player.speed = 4;
+    game.update(0.04);
+    const missGate = game.courseModes.race.gates[0];
+    game.player.x = missGate.flagX + 20;
+    game.player.y = missGate.y - 2;
+    game.player.speed = 4;
+    game.update(0.04);
+    const gateMiss = {
+      passed: missGate.passed,
+      missed: missGate.missed,
+      markerSprite: missGate.marker.spriteId,
+      missedGates: game.courseModes.race.missedGates,
+      penaltyMs: game.courseModes.race.penaltyMs
+    };
+
+    game.restart();
+    game.addStyleScore(7);
+    const outsideFreestyleStyle = game.styleScore;
+    game.player.x = 0;
+    game.player.y = 638;
+    game.player.speed = 4;
+    game.update(0.04);
+    game.addStyleScore(7);
+    const insideFreestyleStyle = game.styleScore;
+
+    game.restart();
+    removeAllObjects();
+    game.player.x = 0;
+    game.player.y = 900;
+    game.player.speed = 4;
+    const ramp = game.addRamp(0, 900);
+    game.checkCollisions();
+    const rampCollision = {
+      kind: ramp.kind,
+      spriteId: ramp.spriteId,
+      hit: ramp.hit === true,
+      playerMode: game.player.mode,
+      actionTimer: game.player.actionTimer
+    };
+
+    game.restart();
+    removeAllObjects();
+    for (let i = 0; i < 1000; i += 1) game.spawnWeightedObject(800, 1000 + i);
+    const sourceKinds = new Set([1, 2, 10, 12, 13, 14, 15]);
+    const distribution = {
+      invalidKinds: game.objects.filter((object) => !sourceKinds.has(object.kind)).map((object) => object.kind),
+      randomFires: game.objects.filter((object) => object.kind === 9).length,
+      randomPatches: game.objects.filter((object) => object.spriteId === 82).length,
+      ramps: game.objects.filter((object) => object.kind === 15 && object.spriteId === 52).length,
+      trees: game.objects.filter((object) => object.kind === 12 && object.spriteId >= 49 && object.spriteId <= 51).length
+    };
+
+    game.restart();
+    removeAllObjects();
+    const dog = game.addDog(0, 900);
+    game.setObjectState(dog, 0x1e);
+    const originalInt = game.rng.int.bind(game.rng);
+    game.rng.int = () => 0;
+    game.advanceDogState(dog);
+    game.rng.int = originalInt;
+    const dogPatch = game.objects.some((object) => object.kind === 16 && object.spriteId === 82);
+
+    const deadTree = game.addObject({ kind: 12, spriteId: 50, x: 0, y: 900, collidable: true });
+    game.player.mode = 1;
+    game.player.airHeight = 1;
+    game.crashInto(deadTree);
+    const deadTreeFire = deadTree.kind === 9 && deadTree.spriteId === 83;
+    const fireFrames = [deadTree.spriteId];
+    for (let i = 0; i < 3; i += 1) {
+      game.updateCourseObjects(0.13);
+      fireFrames.push(deadTree.spriteId);
+    }
+
+    game.restart();
+    removeAllObjects();
+    game.player.x = 0;
+    game.player.y = 900;
+    game.player.speed = 4;
+    const npc = game.addNpcSkier(0, 900);
+    game.checkCollisions();
+    const npcCrash = npc.state === 0x19 && npc.spriteId === 31 && game.player.state === 11;
+
+    game.restart();
+    const occupiedChair = game.objects.find((object) => object.kind === 4 && object.state === 0x27);
+    const savedInt = game.rng.int.bind(game.rng);
+    game.rng.int = () => 0;
+    game.updateLiftChair(occupiedChair, 0);
+    game.rng.int = savedInt;
+    const liftRelease = occupiedChair.state === 0x28
+      && occupiedChair.spriteId === 66
+      && game.objects.some((object) => object.kind === 3 && object.state === 0x21 && object.spriteId === 39);
+
+    game.render();
+    return {
+      courseLayout,
+      gatePass,
+      gateMiss,
+      outsideFreestyleStyle,
+      insideFreestyleStyle,
+      rampCollision,
+      distribution,
+      dogPatch,
+      deadTreeFire,
+      fireFrames,
+      npcCrash,
+      liftRelease
+    };
+  });
+
+  const layout = result.courseLayout;
+  if (
+    layout.raceGateCount !== 24 || layout.treeGateCount !== 39
+    || JSON.stringify(layout.raceFirst) !== JSON.stringify({ y: 0x3c0, x: -0x1f0, spriteId: 23 })
+    || JSON.stringify(layout.raceSecond) !== JSON.stringify({ y: 0x500, x: -0x190, spriteId: 24 })
+    || layout.raceLastY !== 0x2080
+    || JSON.stringify(layout.treeFirst) !== JSON.stringify({ y: 0x410, x: 0x190, spriteId: 23 })
+    || JSON.stringify(layout.treeSecond) !== JSON.stringify({ y: 0x5a0, x: 0x1b0, spriteId: 24 })
+    || layout.treeLastY !== 0x3f70
+  ) throw new Error(`course descriptor layout diverged from SKI.EXE: ${JSON.stringify(layout)}`);
+  if (!layout.gateMarkersValid || layout.introSprites.some((count) => count !== 1) || layout.modeSigns.some((count) => count !== 1) || layout.startLeft !== 3 || layout.startRight !== 3) {
+    throw new Error(`course sprites are missing or duplicated: ${JSON.stringify(layout)}`);
+  }
+  if (
+    layout.liftTowers !== 13 || layout.liftChairs !== 24 || !layout.anchoredAtBottom
+    || !layout.whiteMaskTransparent || !layout.blackFlagOutlineOpaque || !layout.coloredRampCornerOpaque
+  ) {
+    throw new Error(`lift or sprite anchoring is incorrect: ${JSON.stringify(layout)}`);
+  }
+  if (!result.gatePass.passed || result.gatePass.missed || result.gatePass.markerSprite !== 25 || result.gatePass.styleAfter !== result.gatePass.styleBefore + 12 || result.gatePass.passCount !== 1) {
+    throw new Error(`red gate did not pass on its source-correct side: ${JSON.stringify(result.gatePass)}`);
+  }
+  if (result.gateMiss.passed || !result.gateMiss.missed || result.gateMiss.markerSprite !== 26 || result.gateMiss.missedGates !== 1 || result.gateMiss.penaltyMs !== 5000) {
+    throw new Error(`red gate miss/result sprite is incorrect: ${JSON.stringify(result.gateMiss)}`);
+  }
+  if (result.outsideFreestyleStyle !== 0 || result.insideFreestyleStyle !== 7) {
+    throw new Error(`style score escaped freestyle mode: ${JSON.stringify(result)}`);
+  }
+  if (result.rampCollision.kind !== 15 || result.rampCollision.spriteId !== 52 || !result.rampCollision.hit || result.rampCollision.playerMode <= 0 || result.rampCollision.actionTimer <= 0) {
+    throw new Error(`rainbow ramp behavior is incorrect: ${JSON.stringify(result.rampCollision)}`);
+  }
+  if (result.distribution.invalidKinds.length || result.distribution.randomFires || result.distribution.randomPatches || result.distribution.ramps < 1 || result.distribution.trees < 1) {
+    throw new Error(`random spawn table diverged from the recovered selector: ${JSON.stringify(result.distribution)}`);
+  }
+  if (!result.dogPatch || !result.deadTreeFire || JSON.stringify(result.fireFrames) !== JSON.stringify([83, 84, 85, 84]) || !result.npcCrash || !result.liftRelease) {
+    throw new Error(`derived animated objects are missing: ${JSON.stringify({ dogPatch: result.dogPatch, deadTreeFire: result.deadTreeFire, fireFrames: result.fireFrames, npcCrash: result.npcCrash, liftRelease: result.liftRelease })}`);
+  }
+
+  await page.evaluate(() => {
+    const game = window.skiFreeGame;
+    game.restart();
+    game.input.pointerActive = false;
+    game.player.x = game.courseModes.race.gates[0].flagX - 20;
+    game.player.y = game.courseModes.race.gates[0].y - 2;
+    game.player.speed = 4;
+    game.courseModes.race.active = true;
+    game.update(0.04);
+    game.updateCamera();
+    game.updateHud();
+    game.render();
+  });
+  await page.screenshot({ path: path.join(reportsDir, "gate-result.png"), fullPage: false });
+}
+
 async function verifySkiTracks(page) {
   const result = await page.evaluate(() => {
     const game = window.skiFreeGame;
@@ -610,7 +1001,7 @@ async function verifyYetiAttack(page) {
     game.player.y = 2200;
     game.player.speed = 0;
     game.monster = game.addObject({
-      kind: 3,
+      kind: 5,
       spriteId: 68,
       x: 0,
       y: 2200,
@@ -760,9 +1151,10 @@ async function main() {
       const state = await inspectPage(page, viewport.name);
       if (viewport.name === "desktop") {
         await verifyControls(page);
-        await verifySkiTracks(page);
+        await verifyPlayerRivals(page);
+        await verifyModernEffects(page);
         await verifyCourseModes(page);
-        await verifyCourseContent(page);
+        await verifyRecoveredCourseContent(page);
         await verifyYetiChase(page);
         await verifyYetiAttack(page);
       }

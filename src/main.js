@@ -13,20 +13,9 @@ const SIMULATION_FPS = 60;
 const TICK_MS = 1000 / SIMULATION_FPS;
 const PIXELS_PER_METER = 16;
 const MAX_FRAME_SECONDS = 0.08;
-const COURSE_STEP = 120;
-const CAMERA_FOV_DEGREES = 45;
-const CAMERA_DEPTH_RANGE = 90;
-const CAMERA_PLAYER_DEPTH = 12;
-const SNOW_PARTICLE_COUNT = 520;
-const SNOW_FIELD_SCALE = 1.65;
-const SNOW_MIN_Z = -180;
-const SNOW_MAX_Z = 85;
-const SKI_TRACK_MAX_SEGMENTS = 560;
-const SKI_TRACK_SAMPLE_DISTANCE = 7;
-const SKI_TRACK_RESET_DISTANCE = 90;
-const SKI_TRACK_SEPARATION = 9;
-const SKI_TRACK_WIDTH = 2.2;
-const SKI_TRACK_Z = 1.5;
+const COURSE_STEP = 60;
+const CAMERA_DEPTH_RANGE = 0;
+const CAMERA_PLAYER_DEPTH = 0;
 const YETI_CHASE_DISTANCE_METERS = 2000;
 const CHASE_DISTANCE = YETI_CHASE_DISTANCE_METERS * PIXELS_PER_METER;
 const YETI_SPAWN_BACK_VIEWPORT_RATIO = 0.45;
@@ -53,18 +42,13 @@ const DOG_STATES = Object.freeze({
   ALERT: 0x1d,
   BARK: 0x1e
 });
-const NPC_SKIER_STATE_SECONDS = 0.18;
 const NPC_SKIER_STATES = [0x16, 0x17, 0x18];
 const NPC_SKIER_MOTION = Object.freeze({
-  [0x16]: { targetVx: -0.42, targetSpeed: 3.05 },
-  [0x17]: { targetVx: 0, targetSpeed: 3.35 },
-  [0x18]: { targetVx: 0.42, targetSpeed: 3.05 }
+  [0x16]: { targetVx: 0, targetSpeed: 0.25 },
+  [0x17]: { targetVx: -0.5, targetSpeed: 0.25 },
+  [0x18]: { targetVx: 0.5, targetSpeed: 0.25 }
 });
-const GATE_PASS_STYLE_POINTS = 12;
-const GATE_WRONG_SIDE_STYLE_POINTS = 6;
-const GATE_SIDE_FEEDBACK_RADIUS = 150;
-const GATE_PASS_EFFECT_SECONDS = 0.7;
-const GATE_PASS_EFFECT_PARTICLES = 18;
+const ACROBAT_STATE_SECONDS = 0.12;
 const YETI_ATTACK_SECONDS = 1.7;
 const YETI_ATTACK_FRAME_SECONDS = 0.2;
 const YETI_ATTACK_FRAMES = [76, 77, 78, 79, 80, 81];
@@ -72,6 +56,21 @@ const RACE_START_Y = 0x0280;
 const RACE_FINISH_Y = 0x21c0;
 const LONG_COURSE_FINISH_Y = 0x4100;
 const GATE_PENALTY_MS = 5000;
+const RACE_GATE_START_Y = 0x03c0;
+const RACE_GATE_STEP_Y = 0x0140;
+const TREE_GATE_START_Y = 0x0410;
+const TREE_GATE_STEP_Y = 0x0190;
+const LIFT_MIN_Y = -0x0400;
+const LIFT_MAX_Y = 0x5c00;
+const LIFT_STEP_Y = 0x0800;
+const GATE_STYLE_POINTS = 12;
+const SNOW_PARTICLE_COUNT = 360;
+const SKI_TRACK_MAX_SEGMENTS = 900;
+const SKI_TRACK_SAMPLE_DISTANCE = 5;
+const SKI_TRACK_SEPARATION = 7;
+const RIVAL_KIND = "rival-player";
+const RIVAL_NAMES = ["PowderFox", "Mika", "IceByte", "AlpineAce"];
+const RIVAL_COUNT = 3;
 
 const COURSE_LANES = Object.freeze({
   race: {
@@ -174,64 +173,17 @@ class AssetStore {
 
     const frame = ctx.getImageData(0, 0, width, height);
     const data = frame.data;
-    const cornerColors = [
-      this.pixelAt(data, width, 0, 0),
-      this.pixelAt(data, width, width - 1, 0),
-      this.pixelAt(data, width, 0, height - 1),
-      this.pixelAt(data, width, width - 1, height - 1)
-    ];
-    const visited = new Uint8Array(width * height);
-    const stack = [];
-
-    const enqueue = (x, y) => {
-      if (x < 0 || y < 0 || x >= width || y >= height) return;
-      const index = y * width + x;
-      if (visited[index]) return;
-      if (!this.isBackgroundPixel(data, index * 4, cornerColors)) return;
-      visited[index] = 1;
-      stack.push(index);
-    };
-
-    for (let x = 0; x < width; x += 1) {
-      enqueue(x, 0);
-      enqueue(x, height - 1);
-    }
-    for (let y = 0; y < height; y += 1) {
-      enqueue(0, y);
-      enqueue(width - 1, y);
-    }
-
-    while (stack.length > 0) {
-      const index = stack.pop();
-      const offset = index * 4;
-      data[offset + 3] = 0;
-      const x = index % width;
-      const y = (index - x) / width;
-      enqueue(x + 1, y);
-      enqueue(x - 1, y);
-      enqueue(x, y + 1);
-      enqueue(x, y - 1);
+    // Win16's monochrome mask treats white as the transparent color. Several
+    // resources intentionally have black or colored corner pixels, so corner
+    // flood-fill erases real outlines (flags 23/24) and a ramp stripe (52).
+    for (let offset = 0; offset < data.length; offset += 4) {
+      if (data[offset] >= 248 && data[offset + 1] >= 248 && data[offset + 2] >= 248) {
+        data[offset + 3] = 0;
+      }
     }
 
     ctx.putImageData(frame, 0, 0);
     return { canvas, width, height };
-  }
-
-  pixelAt(data, width, x, y) {
-    const offset = (y * width + x) * 4;
-    return [data[offset], data[offset + 1], data[offset + 2]];
-  }
-
-  isBackgroundPixel(data, offset, cornerColors) {
-    const r = data[offset];
-    const g = data[offset + 1];
-    const b = data[offset + 2];
-    return cornerColors.some(([cr, cg, cb]) => {
-      const dr = r - cr;
-      const dg = g - cg;
-      const db = b - cb;
-      return dr * dr + dg * dg + db * db <= 64;
-    });
   }
 
   material(id) {
@@ -265,21 +217,25 @@ class SkiFreeGame {
       speed: document.querySelector("#speed-value"),
       style: document.querySelector("#style-value")
     };
+    this.styleEffects = document.querySelector("#style-effects");
 
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
       antialias: false,
       alpha: false
     });
-    this.renderer.setClearColor(0xf7f8f4, 1);
+    this.renderer.setClearColor(0xffffff, 1);
     this.renderer.sortObjects = true;
 
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(CAMERA_FOV_DEGREES, 4 / 3, 0.1, 5000);
-    this.camera.position.z = 800;
+    this.camera = new THREE.OrthographicCamera(-400, 400, 300, -300, -100, 100);
+    this.camera.position.z = 10;
     this.assets = new AssetStore(`${import.meta.env.BASE_URL}assets/bitmaps`);
 
     this.viewport = { width: 800, height: 600 };
+    this.createSnowSystem();
+    this.createSkiTrackSystem();
+    this.createPlayerShadow();
     this.input = {
       pointerActive: false,
       pointerX: 0,
@@ -291,12 +247,6 @@ class SkiFreeGame {
     this.debugFast = false;
     this.paused = false;
     this.started = false;
-    this.gateEffects = [];
-    this.skiTracks = this.createSkiTrackSystem();
-    this.scene.add(this.skiTracks.mesh);
-    this.snowTime = 0;
-    this.snow = this.createSnowSystem();
-    this.scene.add(this.snow.points);
 
     this.resize = this.resize.bind(this);
     this.frame = this.frame.bind(this);
@@ -324,146 +274,36 @@ class SkiFreeGame {
     this.viewport.height = height;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.setSize(width, height, false);
-    this.camera.aspect = width / height;
-    this.camera.position.z = height / (2 * Math.tan(THREE.MathUtils.degToRad(CAMERA_FOV_DEGREES) / 2));
+    this.camera.left = -width / 2;
+    this.camera.right = width / 2;
+    this.camera.top = height / 2;
+    this.camera.bottom = -height / 2;
     this.camera.updateProjectionMatrix();
-    if (this.snow) this.resetSnowParticles();
-  }
-
-  createSnowSystem() {
-    const positions = new Float32Array(SNOW_PARTICLE_COUNT * 3);
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    const material = new THREE.PointsMaterial({
-      color: 0xaec2d5,
-      size: 2.4,
-      transparent: true,
-      opacity: 0.74,
-      sizeAttenuation: false,
-      depthTest: false,
-      depthWrite: false
-    });
-    const points = new THREE.Points(geometry, material);
-    points.renderOrder = 100000;
-    points.frustumCulled = false;
-    const snow = {
-      count: SNOW_PARTICLE_COUNT,
-      points,
-      geometry,
-      positions,
-      localX: new Float32Array(SNOW_PARTICLE_COUNT),
-      localY: new Float32Array(SNOW_PARTICLE_COUNT),
-      localZ: new Float32Array(SNOW_PARTICLE_COUNT),
-      fallSpeed: new Float32Array(SNOW_PARTICLE_COUNT),
-      driftSpeed: new Float32Array(SNOW_PARTICLE_COUNT),
-      phase: new Float32Array(SNOW_PARTICLE_COUNT)
-    };
-    this.resetSnowParticles(snow);
-    return snow;
-  }
-
-  resetSnowParticles(snow = this.snow) {
-    const rng = new SeededRandom(0x5a0f1ce);
-    const width = this.viewport.width * SNOW_FIELD_SCALE;
-    const height = this.viewport.height * SNOW_FIELD_SCALE;
-    snow.fieldWidth = width;
-    snow.fieldHeight = height;
-    for (let i = 0; i < snow.count; i += 1) {
-      snow.localX[i] = rng.range(-width / 2, width / 2);
-      snow.localY[i] = rng.range(-height / 2, height / 2);
-      snow.localZ[i] = rng.range(SNOW_MIN_Z, SNOW_MAX_Z);
-      snow.fallSpeed[i] = rng.range(42, 128);
-      snow.driftSpeed[i] = rng.range(-22, 18);
-      snow.phase[i] = rng.range(0, Math.PI * 2);
-    }
-    this.updateSnow(0, snow);
-  }
-
-  updateSnow(dt, snow = this.snow) {
-    if (!snow) return;
-    this.snowTime += dt;
-    const width = this.viewport.width * SNOW_FIELD_SCALE;
-    const height = this.viewport.height * SNOW_FIELD_SCALE;
-    snow.fieldWidth = width;
-    snow.fieldHeight = height;
-    const halfWidth = width / 2;
-    const halfHeight = height / 2;
-    for (let i = 0; i < snow.count; i += 1) {
-      const sway = Math.sin(this.snowTime * 1.7 + snow.phase[i]) * 12;
-      snow.localX[i] += (snow.driftSpeed[i] + sway) * dt;
-      snow.localY[i] -= snow.fallSpeed[i] * dt;
-
-      while (snow.localX[i] < -halfWidth) snow.localX[i] += width;
-      while (snow.localX[i] > halfWidth) snow.localX[i] -= width;
-      while (snow.localY[i] < -halfHeight) {
-        snow.localY[i] += height;
-        snow.localX[i] += 137;
+    this.resetSnowField();
+    if (this.objects) {
+      const helpX = width <= 640 ? 8 : Math.max(
+        this.assets.size(SPRITE.HELP_MOUSE).width,
+        this.assets.size(SPRITE.HELP_KEYS).width
+      );
+      for (const object of this.objects) {
+        if (object.introHelp) object.x = helpX;
       }
-      while (snow.localY[i] > halfHeight) snow.localY[i] -= height;
-
-      const offset = i * 3;
-      snow.positions[offset] = this.camera.position.x + snow.localX[i];
-      snow.positions[offset + 1] = this.camera.position.y + snow.localY[i];
-      snow.positions[offset + 2] = snow.localZ[i];
+      this.layoutCourseLabels();
     }
-    snow.geometry.attributes.position.needsUpdate = true;
-  }
-
-  createSkiTrackSystem() {
-    const floatsPerSegment = 36;
-    const positions = new Float32Array(SKI_TRACK_MAX_SEGMENTS * floatsPerSegment);
-    const geometry = new THREE.BufferGeometry();
-    const position = new THREE.BufferAttribute(positions, 3);
-    position.setUsage(THREE.DynamicDrawUsage);
-    geometry.setAttribute("position", position);
-    geometry.setDrawRange(0, 0);
-    const material = new THREE.MeshBasicMaterial({
-      color: 0xaeb9c2,
-      transparent: true,
-      opacity: 0.68,
-      depthTest: false,
-      depthWrite: false,
-      side: THREE.DoubleSide
-    });
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.renderOrder = -10000;
-    mesh.frustumCulled = false;
-    return {
-      maxSegments: SKI_TRACK_MAX_SEGMENTS,
-      floatsPerSegment,
-      positions,
-      geometry,
-      mesh,
-      segmentCount: 0,
-      previous: null
-    };
-  }
-
-  resetSkiTrackMarks() {
-    if (!this.skiTracks) return;
-    this.skiTracks.segmentCount = 0;
-    this.skiTracks.previous = null;
-    this.skiTracks.geometry.setDrawRange(0, 0);
-    this.skiTracks.geometry.attributes.position.needsUpdate = true;
   }
 
   restart() {
     if (this.player) this.removeSprite(this.player);
     for (const object of this.objects || []) this.removeSprite(object);
-    for (const trail of this.trails || []) this.scene.remove(trail.sprite);
-    for (const effect of this.gateEffects || []) this.removeGatePassEffect(effect);
 
     this.rng = new SeededRandom();
     this.objects = [];
-    this.trails = [];
-    this.gateEffects = [];
-    this.resetSkiTrackMarks();
     this.nextSpawnY = -120;
     this.elapsedMs = 0;
     this.styleScore = 0;
     this.gatePassCount = 0;
     this.lastGateStyleAward = 0;
-    this.lastTrailY = -9999;
+    this.sideSpawnAnchorX = 0;
     this.monster = null;
     this.yetiAttack = {
       active: false,
@@ -480,6 +320,8 @@ class SkiFreeGame {
     document.title = "SkiFree";
     this.pauseCard.textContent = "Paused";
     this.pauseCard.hidden = true;
+    this.styleEffects.replaceChildren();
+    this.resetSkiTracks();
 
     this.player = {
       kind: OBJECT_KIND.PLAYER,
@@ -494,6 +336,12 @@ class SkiFreeGame {
       pendingAction: 0,
       mode: 0,
       crashedUntil: 0,
+      recoveryUntil: 0,
+      actionDuration: 0,
+      actionElapsed: 0,
+      actionPeak: 0,
+      airHeight: 0,
+      manualTrickTimer: 0,
       renderScale: 1,
       collidable: true
     };
@@ -501,11 +349,160 @@ class SkiFreeGame {
     this.player.sprite.visible = true;
     this.syncPlayerDataset();
 
+    this.addIntroDecorations();
     this.addCourseMarkers();
+    this.addPlayerRivals();
 
     this.spawnCourseUntil(this.viewport.height * 2);
     this.updateCamera();
+    this.updateSnow(0);
+    this.updatePlayerShadow();
     this.updateHud();
+  }
+
+  createSnowSystem() {
+    const positions = new Float32Array(SNOW_PARTICLE_COUNT * 3);
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    const material = new THREE.PointsMaterial({
+      color: 0xa9c6dd,
+      size: 2,
+      transparent: true,
+      opacity: 0.58,
+      depthTest: false,
+      depthWrite: false,
+      sizeAttenuation: false
+    });
+    const points = new THREE.Points(geometry, material);
+    points.frustumCulled = false;
+    points.renderOrder = 100000;
+    this.scene.add(points);
+    this.snow = {
+      count: SNOW_PARTICLE_COUNT,
+      positions,
+      geometry,
+      points,
+      flakes: Array.from({ length: SNOW_PARTICLE_COUNT }, () => ({ x: 0, y: 0, speed: 0, drift: 0 })),
+      fieldWidth: 0,
+      fieldHeight: 0
+    };
+  }
+
+  resetSnowField() {
+    if (!this.snow) return;
+    this.snow.fieldWidth = this.viewport.width * 1.2;
+    this.snow.fieldHeight = this.viewport.height * 1.2;
+    const random = () => Math.random();
+    for (const flake of this.snow.flakes) {
+      flake.x = (random() - 0.5) * this.snow.fieldWidth;
+      flake.y = (random() - 0.5) * this.snow.fieldHeight;
+      flake.speed = 22 + random() * 44;
+      flake.drift = 5 + random() * 15;
+    }
+  }
+
+  updateSnow(dt) {
+    if (!this.snow) return;
+    const halfWidth = this.snow.fieldWidth / 2;
+    const halfHeight = this.snow.fieldHeight / 2;
+    const time = this.elapsedMs * 0.001;
+    for (let i = 0; i < this.snow.flakes.length; i += 1) {
+      const flake = this.snow.flakes[i];
+      flake.y -= flake.speed * dt;
+      flake.x += Math.sin(time * 0.8 + i) * flake.drift * dt;
+      if (flake.y < -halfHeight) {
+        flake.y = halfHeight;
+        flake.x = (Math.random() - 0.5) * this.snow.fieldWidth;
+      }
+      if (flake.x < -halfWidth) flake.x += this.snow.fieldWidth;
+      if (flake.x > halfWidth) flake.x -= this.snow.fieldWidth;
+      const offset = i * 3;
+      this.snow.positions[offset] = this.camera.position.x + flake.x;
+      this.snow.positions[offset + 1] = this.camera.position.y + flake.y;
+      this.snow.positions[offset + 2] = 2;
+    }
+    this.snow.geometry.attributes.position.needsUpdate = true;
+  }
+
+  createSkiTrackSystem() {
+    const positions = new Float32Array(SKI_TRACK_MAX_SEGMENTS * 2 * 2 * 3);
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geometry.setDrawRange(0, 0);
+    const material = new THREE.LineBasicMaterial({ color: 0xb8cedd, transparent: true, opacity: 0.68, depthTest: false });
+    const lines = new THREE.LineSegments(geometry, material);
+    lines.frustumCulled = false;
+    lines.renderOrder = -100000;
+    this.scene.add(lines);
+    this.skiTracks = { positions, geometry, lines, segments: 0, last: null };
+  }
+
+  resetSkiTracks() {
+    if (!this.skiTracks) return;
+    this.skiTracks.segments = 0;
+    this.skiTracks.last = null;
+    this.skiTracks.geometry.setDrawRange(0, 0);
+  }
+
+  updateSkiTracks() {
+    const tracks = this.skiTracks;
+    const player = this.player;
+    const grounded = player.airHeight <= 0.1 && player.actionTimer <= 0 && player.crashedUntil <= 0
+      && player.state !== PLAYER_STATE.FALLEN && player.state !== PLAYER_STATE.CRASHED;
+    if (!grounded || player.speed < 0.25) {
+      tracks.last = null;
+      return;
+    }
+    const current = { x: player.x, y: -player.y };
+    if (!tracks.last) {
+      tracks.last = current;
+      return;
+    }
+    if (Math.hypot(current.x - tracks.last.x, current.y - tracks.last.y) < SKI_TRACK_SAMPLE_DISTANCE) return;
+    if (tracks.segments >= SKI_TRACK_MAX_SEGMENTS) {
+      tracks.positions.copyWithin(0, 12);
+      tracks.segments -= 1;
+    }
+    const dx = current.x - tracks.last.x;
+    const dy = current.y - tracks.last.y;
+    const length = Math.max(0.001, Math.hypot(dx, dy));
+    const sideX = (-dy / length) * SKI_TRACK_SEPARATION * 0.5;
+    const sideY = (dx / length) * SKI_TRACK_SEPARATION * 0.5;
+    const values = [
+      tracks.last.x - sideX, tracks.last.y - sideY, -2, current.x - sideX, current.y - sideY, -2,
+      tracks.last.x + sideX, tracks.last.y + sideY, -2, current.x + sideX, current.y + sideY, -2
+    ];
+    tracks.positions.set(values, tracks.segments * 12);
+    tracks.segments += 1;
+    tracks.last = current;
+    tracks.geometry.setDrawRange(0, tracks.segments * 4);
+    tracks.geometry.attributes.position.needsUpdate = true;
+  }
+
+  createPlayerShadow() {
+    const material = new THREE.MeshBasicMaterial({ color: 0x9fb4c4, transparent: true, opacity: 0.2, depthTest: false, depthWrite: false });
+    this.playerShadow = new THREE.Mesh(new THREE.CircleGeometry(10, 16), material);
+    this.playerShadow.scale.set(1, 0.28, 1);
+    this.scene.add(this.playerShadow);
+  }
+
+  updatePlayerShadow() {
+    if (!this.player) return;
+    const air = this.player.airHeight || 0;
+    this.playerShadow.position.set(this.player.x, -this.player.y + 1, -1);
+    this.playerShadow.scale.set(1 + air / 70, 0.28 + air / 350, 1);
+    this.playerShadow.material.opacity = Math.max(0.045, 0.2 - air / 260);
+    this.playerShadow.renderOrder = Math.floor(this.player.y) - 1;
+  }
+
+  showStylePoints(points, label = "Style") {
+    if (points <= 0 || !this.styleEffects) return;
+    const effect = document.createElement("div");
+    effect.className = "style-popup";
+    effect.textContent = `+${Math.floor(points)} ${label}`;
+    effect.style.setProperty("--drift", `${Math.round((Math.random() - 0.5) * 54)}px`);
+    this.styleEffects.append(effect);
+    effect.addEventListener("animationend", () => effect.remove(), { once: true });
   }
 
   createCourseModes() {
@@ -519,7 +516,7 @@ class SkiFreeGame {
         missedGates: 0,
         nextGate: 0,
         resultMs: 0,
-        gates: this.buildGateSet(COURSE_LANES.race.signX, 1120, 680, 11, 74)
+        gates: this.buildGateSet(RACE_GATE_START_Y, RACE_GATE_STEP_Y, RACE_FINISH_Y, -0x01f0, -0x0190)
       },
       freestyle: {
         ...COURSE_LANES.freestyle,
@@ -541,74 +538,172 @@ class SkiFreeGame {
         missedGates: 0,
         nextGate: 0,
         resultMs: 0,
-        gates: this.buildGateSet(COURSE_LANES.treeSlalom.signX, 1180, 760, 19, 70)
+        gates: this.buildGateSet(TREE_GATE_START_Y, TREE_GATE_STEP_Y, LONG_COURSE_FINISH_Y, 0x0190, 0x01b0)
       }
     };
   }
 
-  buildGateSet(centerX, startY, stepY, count, halfWidth) {
+  buildGateSet(startY, stepY, finishY, redX, blueX) {
+    const count = Math.ceil((finishY - startY) / stepY);
     return Array.from({ length: count }, (_, index) => {
-      const drift = index % 2 === 0 ? -30 : 30;
-      const x = centerX + drift;
-      const left = x - halfWidth;
-      const right = x + halfWidth;
-      const isLeftFlag = index % 2 === 0;
+      const isRed = index % 2 === 0;
       return {
-        x,
         y: startY + index * stepY,
-        left,
-        right,
-        flagX: isLeftFlag ? left : right,
-        isLeftFlag,
+        flagX: isRed ? redX : blueX,
+        spriteId: isRed ? SPRITE.FLAG_RED : SPRITE.FLAG_BLUE,
+        isRed,
         passed: false,
         missed: false,
-        styleAwarded: false,
-        feedbackAwarded: false
+        marker: null
       };
     });
   }
 
   addCourseMarkers() {
-    this.addCourseSignPair(COURSE_LANES.race.signX, RACE_START_Y - 72, SPRITE.SLALOM_SIGN);
-    this.addCourseSignPair(COURSE_LANES.freestyle.signX, RACE_START_Y - 72, SPRITE.FREESTYLE_SIGN);
-    this.addCourseSignPair(COURSE_LANES.treeSlalom.signX, RACE_START_Y - 72, SPRITE.TREE_SLALOM_SIGN);
+    this.addCourseSign(0, 0, SPRITE.SLALOM_SIGN, "race");
+    this.addCourseSign(0, 0, SPRITE.FREESTYLE_SIGN, "freestyle");
+    this.addCourseSign(0, 0, SPRITE.TREE_SLALOM_SIGN, "treeSlalom");
+    this.layoutCourseLabels();
 
-    this.addCourseSignPair(COURSE_LANES.race.signX, RACE_FINISH_Y, SPRITE.FINISH_LEFT, SPRITE.FINISH_RIGHT);
-    this.addCourseSignPair(COURSE_LANES.freestyle.signX, LONG_COURSE_FINISH_Y, SPRITE.FINISH_LEFT, SPRITE.FINISH_RIGHT);
-    this.addCourseSignPair(COURSE_LANES.treeSlalom.signX, LONG_COURSE_FINISH_Y, SPRITE.FINISH_LEFT, SPRITE.FINISH_RIGHT);
+    this.addCourseSignPair(COURSE_LANES.race.signX, RACE_START_Y, SPRITE.START_LEFT, SPRITE.START_RIGHT, 128);
+    this.addCourseSignPair(COURSE_LANES.freestyle.signX, RACE_START_Y, SPRITE.START_LEFT, SPRITE.START_RIGHT, 160);
+    this.addCourseSignPair(COURSE_LANES.treeSlalom.signX, RACE_START_Y, SPRITE.START_LEFT, SPRITE.START_RIGHT, 96);
+
+    this.addCourseSignPair(COURSE_LANES.race.signX, RACE_FINISH_Y, SPRITE.FINISH_LEFT, SPRITE.FINISH_RIGHT, 128);
+    this.addCourseSignPair(COURSE_LANES.freestyle.signX, LONG_COURSE_FINISH_Y, SPRITE.FINISH_LEFT, SPRITE.FINISH_RIGHT, 160);
+    this.addCourseSignPair(COURSE_LANES.treeSlalom.signX, LONG_COURSE_FINISH_Y, SPRITE.FINISH_LEFT, SPRITE.FINISH_RIGHT, 96);
 
     for (const mode of [this.courseModes.race, this.courseModes.treeSlalom]) {
       for (const [index, gate] of mode.gates.entries()) {
         this.addGateSprite(gate, index);
       }
     }
+
+    for (const gate of this.courseModes.treeSlalom.gates) {
+      this.addTree(
+        this.rng.int(0x0190, 0x01af),
+        gate.y + this.rng.int(0, TREE_GATE_STEP_Y - 1)
+      );
+    }
+
+    this.addSkiLift();
   }
 
-  addCourseSignPair(x, y, leftSpriteId, rightSpriteId = leftSpriteId) {
+  addIntroDecorations() {
+    const titleX = -Math.trunc(this.assets.size(SPRITE.TITLE).width / 2) - 40;
+    const recoveredHelpX = Math.max(
+      this.assets.size(SPRITE.HELP_MOUSE).width,
+      this.assets.size(SPRITE.HELP_KEYS).width
+    );
+    const helpX = this.viewport.width <= 640 ? 8 : recoveredHelpX;
+    const versionY = this.assets.size(SPRITE.VERSION).height + 4;
+    const helpMouseY = this.assets.size(SPRITE.HELP_MOUSE).height;
+    const helpKeysY = helpMouseY + this.assets.size(SPRITE.HELP_KEYS).height + 4;
+
+    for (const [spriteId, x, y, introHelp] of [
+      [SPRITE.TITLE, titleX, 0, false],
+      [SPRITE.VERSION, titleX, versionY, false],
+      [SPRITE.HELP_MOUSE, helpX, helpMouseY, true],
+      [SPRITE.HELP_KEYS, helpX, helpKeysY, true]
+    ]) {
+      this.addObject({
+        kind: OBJECT_KIND.SIGN,
+        spriteId,
+        x,
+        y,
+        introHelp,
+        collidable: false,
+        permanent: true
+      });
+    }
+  }
+
+  layoutCourseLabels() {
+    if (!this.objects) return;
+    const sideX = Math.max(0, this.viewport.width / 2 - 60);
+    const candidateY = this.viewport.height * 0.66 - 60;
+    const y = candidateY > RACE_START_Y ? RACE_START_Y - 120 : candidateY;
+    const xByCourse = {
+      race: Math.max(-0x0140, -sideX),
+      freestyle: 0,
+      treeSlalom: Math.min(0x0140, sideX)
+    };
+    for (const object of this.objects) {
+      if (!object.courseLabel) continue;
+      object.x = xByCourse[object.courseLabel];
+      object.y = y;
+    }
+  }
+
+  addCourseSign(x, y, spriteId, courseLabel = "") {
+    this.addObject({
+      kind: OBJECT_KIND.SIGN,
+      spriteId,
+      x,
+      y,
+      courseLabel,
+      collidable: false,
+      permanent: true
+    });
+  }
+
+  addCourseSignPair(x, y, leftSpriteId, rightSpriteId, halfWidth = 34) {
     this.addObject({
       kind: OBJECT_KIND.SIGN,
       spriteId: leftSpriteId,
-      x: x - 34,
+      x: x - halfWidth,
       y,
-      collidable: false
+      collidable: false,
+      permanent: true
     });
     this.addObject({
       kind: OBJECT_KIND.SIGN,
       spriteId: rightSpriteId,
-      x: x + 34,
+      x: x + halfWidth,
       y,
-      collidable: false
+      collidable: false,
+      permanent: true
     });
   }
 
   addGateSprite(gate, index) {
-    const isLeft = gate.isLeftFlag ?? index % 2 === 0;
-    this.addObject({
+    gate.marker = this.addObject({
       kind: OBJECT_KIND.MARKER,
-      spriteId: isLeft ? SPRITE.FLAG_RED : SPRITE.FLAG_BLUE,
-      x: gate.flagX ?? (isLeft ? gate.left : gate.right),
+      spriteId: gate.spriteId ?? (index % 2 === 0 ? SPRITE.FLAG_RED : SPRITE.FLAG_BLUE),
+      x: gate.flagX,
       y: gate.y,
-      collidable: false
+      collidable: false,
+      permanent: true
+    });
+  }
+
+  addSkiLift() {
+    for (let y = LIFT_MIN_Y; y <= LIFT_MAX_Y; y += LIFT_STEP_Y) {
+      this.addObject({
+        kind: OBJECT_KIND.TOWER,
+        spriteId: SPRITE.SKI_LIFT_TOWER,
+        x: -0x0080,
+        y,
+        collidable: true,
+        collisionScale: 0.48,
+        permanent: true
+      });
+      if (y > LIFT_MIN_Y) this.addLiftChair(-0x0070, y, -2, SPRITE.SKI_LIFT_CHAIR_1);
+      if (y < LIFT_MAX_Y) this.addLiftChair(-0x0090, y, 2, SPRITE.SKI_LIFT_CHAIR_3);
+    }
+  }
+
+  addLiftChair(x, y, velocityY, spriteId) {
+    return this.addObject({
+      kind: OBJECT_KIND.LIFT_CHAIR,
+      state: spriteId === SPRITE.SKI_LIFT_CHAIR_1 ? 0x27 : 0x29,
+      spriteId,
+      x,
+      y,
+      velocityY,
+      collidable: true,
+      collisionScale: 0.6,
+      permanent: true
     });
   }
 
@@ -631,17 +726,20 @@ class SkiFreeGame {
   update(dt) {
     const scaledDt = this.debugFast ? dt * 2 : dt;
     const previousPlayer = { x: this.player.x, y: this.player.y };
-    this.updateSnow(scaledDt);
 
     if (this.yetiAttack.active) {
       this.updateYetiAttack(scaledDt);
       this.updateCamera();
+      this.updateSnow(scaledDt);
+      this.updatePlayerShadow();
       this.updateHud();
       return;
     }
 
     if (this.gameOver) {
       this.updateCamera();
+      this.updateSnow(scaledDt);
+      this.updatePlayerShadow();
       this.updateHud();
       return;
     }
@@ -650,50 +748,72 @@ class SkiFreeGame {
 
     this.applyPointerState();
     this.integratePlayer(scaledDt);
-    this.checkGateStyleFeedback(previousPlayer);
+    this.updateSkiTracks();
     this.updateCourseModes(previousPlayer, scaledDt);
-    this.updateGatePassEffects(scaledDt);
     this.updateCourseObjects(scaledDt);
     this.checkCollisions();
-    this.updateTrails();
     this.spawnCourseUntil(this.player.y + this.viewport.height * 2.1);
+    this.spawnSideObjects();
     this.pruneObjects();
     this.updateCamera();
+    this.updateSnow(scaledDt);
+    this.updatePlayerShadow();
     this.updateHud();
   }
 
   integratePlayer(dt) {
     const player = this.player;
 
+    player.manualTrickTimer = Math.max(0, (player.manualTrickTimer || 0) - dt);
+
     if (player.actionTimer > 0) {
       player.actionTimer = Math.max(0, player.actionTimer - dt);
+      player.actionElapsed += dt;
+      const duration = Math.max(0.001, player.actionDuration || player.actionTimer + player.actionElapsed);
+      const progress = Math.min(1, player.actionElapsed / duration);
+      const peak = player.actionPeak || (player.pendingAction === 4 ? 34 : 22);
+      player.airHeight = Math.sin(progress * Math.PI) * peak;
+      player.mode = Math.max(1, Math.round(player.airHeight));
       if (player.actionTimer === 0 && player.state !== PLAYER_STATE.CRASHED) {
         player.pendingAction = 0;
         player.mode = 0;
+        player.airHeight = 0;
+        player.actionDuration = 0;
+        player.actionElapsed = 0;
+        player.actionPeak = 0;
         this.setPlayerState(PLAYER_STATE.STRAIGHT);
       }
     }
 
     if (player.crashedUntil > 0) {
       player.crashedUntil = Math.max(0, player.crashedUntil - dt);
-      if (player.crashedUntil === 0 && player.state === PLAYER_STATE.CRASHED) {
+      if (player.crashedUntil === 0 && (player.state === PLAYER_STATE.CRASHED || player.state === PLAYER_STATE.FALLEN)) {
+        player.recoveryUntil = 0.55;
         this.setPlayerState(PLAYER_STATE.RECOVERING);
       }
     }
 
+    if (player.recoveryUntil > 0) {
+      player.recoveryUntil = Math.max(0, player.recoveryUntil - dt);
+      if (player.recoveryUntil === 0 && player.state === PLAYER_STATE.RECOVERING) {
+        this.setPlayerState(PLAYER_STATE.STRAIGHT);
+      }
+    }
+
     const motion = PLAYER_MOTION[player.state] || PLAYER_MOTION[0];
-    const vxTarget = motion.targetVx + player.turnVelocity * 0.07;
+    const profileVx = motion.vxRatio == null
+      ? (motion.targetVx || 0)
+      : Math.max(-4.2, Math.min(4.2, player.speed * motion.vxRatio));
+    const vxTarget = profileVx + player.turnVelocity * 0.07;
     const turnBlend = Math.min(1, dt * motion.turn);
     const speedBlend = Math.min(1, dt * motion.accel);
     player.vx += (vxTarget - player.vx) * turnBlend;
     player.speed += (motion.targetSpeed - player.speed) * speedBlend;
+    player.turnVelocity *= Math.max(0, 1 - dt * 4.5);
 
     player.x += player.vx * dt * 60;
     player.y += Math.max(0, player.speed) * dt * 60;
 
-    if (player.state === PLAYER_STATE.RECOVERING && player.speed > 1.0) {
-      this.setPlayerState(PLAYER_STATE.STRAIGHT);
-    }
   }
 
   updateCourseModes(previousPlayer, dt) {
@@ -742,8 +862,10 @@ class SkiFreeGame {
     mode.gates.forEach((gate) => {
       gate.passed = false;
       gate.missed = false;
-      gate.styleAwarded = false;
-      gate.feedbackAwarded = false;
+      if (gate.marker) {
+        gate.marker.spriteId = gate.spriteId;
+        this.refreshSprite(gate.marker);
+      }
     });
     this.courseMessage = `${mode.label} started`;
   }
@@ -765,45 +887,24 @@ class SkiFreeGame {
       if (!this.crossedY(previousPlayer.y, this.player.y, gate.y)) break;
 
       const crossingX = this.xAtY(previousPlayer, this.player, gate.y);
-      if (crossingX >= gate.left && crossingX <= gate.right) {
+      const passed = gate.isRed ? crossingX <= gate.flagX : crossingX >= gate.flagX;
+      if (passed) {
         gate.passed = true;
+        this.gatePassCount += 1;
+        this.styleScore += GATE_STYLE_POINTS;
+        this.lastGateStyleAward = GATE_STYLE_POINTS;
+        this.showStylePoints(GATE_STYLE_POINTS, "Gate");
       } else {
         gate.missed = true;
         mode.missedGates += 1;
         mode.penaltyMs += GATE_PENALTY_MS;
       }
+      if (gate.marker) {
+        gate.marker.spriteId = passed ? SPRITE.GATE_PASSED : SPRITE.GATE_MISSED;
+        this.refreshSprite(gate.marker);
+      }
       mode.nextGate += 1;
     }
-  }
-
-  checkGateStyleFeedback(previousPlayer) {
-    for (const mode of [this.courseModes.race, this.courseModes.treeSlalom]) {
-      for (const gate of mode.gates) {
-        if (gate.feedbackAwarded || !this.crossedY(previousPlayer.y, this.player.y, gate.y)) continue;
-        const crossingX = this.xAtY(previousPlayer, this.player, gate.y);
-        if (!this.isNearGateFlag(gate, crossingX)) continue;
-        this.awardGateStyleFeedback(gate, crossingX);
-      }
-    }
-  }
-
-  isNearGateFlag(gate, crossingX) {
-    return Math.abs(crossingX - gate.flagX) <= GATE_SIDE_FEEDBACK_RADIUS
-      || (crossingX >= gate.left && crossingX <= gate.right);
-  }
-
-  awardGateStyleFeedback(gate, crossingX) {
-    const correctSide = crossingX >= gate.left && crossingX <= gate.right;
-    const stylePoints = correctSide ? GATE_PASS_STYLE_POINTS : GATE_WRONG_SIDE_STYLE_POINTS;
-    gate.feedbackAwarded = true;
-    gate.styleAwarded = true;
-    gate.feedbackCorrectSide = correctSide;
-    gate.feedbackX = crossingX;
-    gate.feedbackPoints = stylePoints;
-    this.addStyleScore(stylePoints);
-    this.lastGateStyleAward = stylePoints;
-    this.gatePassCount += 1;
-    this.spawnGatePassEffect(crossingX, gate.y, correctSide);
   }
 
   crossedY(previousY, currentY, targetY) {
@@ -817,163 +918,77 @@ class SkiFreeGame {
     return previous.x + (current.x - previous.x) * t;
   }
 
-  addStyleScore(amount) {
-    this.styleScore += amount;
-  }
-
-  spawnGatePassEffect(x, y, correctSide = true) {
-    const group = new THREE.Group();
-    group.position.set(x, -y, CAMERA_PLAYER_DEPTH + 10);
-
-    const ringMaterial = new THREE.MeshBasicMaterial({
-      color: correctSide ? 0x008cff : 0xff4d2e,
-      transparent: true,
-      opacity: 0.82,
-      depthTest: false,
-      depthWrite: false,
-      side: THREE.DoubleSide
-    });
-    const glowMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffc400,
-      transparent: true,
-      opacity: 0.5,
-      depthTest: false,
-      depthWrite: false,
-      side: THREE.DoubleSide
-    });
-    const ring = new THREE.Mesh(new THREE.RingGeometry(10, 12, 48), ringMaterial);
-    const glow = new THREE.Mesh(new THREE.RingGeometry(18, 21, 64), glowMaterial);
-    ring.renderOrder = 95000;
-    glow.renderOrder = 94999;
-    group.add(glow);
-    group.add(ring);
-
-    const particlePositions = new Float32Array(GATE_PASS_EFFECT_PARTICLES * 3);
-    const particleVelocities = new Float32Array(GATE_PASS_EFFECT_PARTICLES * 3);
-    for (let i = 0; i < GATE_PASS_EFFECT_PARTICLES; i += 1) {
-      const angle = (Math.PI * 2 * i) / GATE_PASS_EFFECT_PARTICLES + this.rng.range(-0.18, 0.18);
-      const speed = this.rng.range(38, 76);
-      const offset = i * 3;
-      particleVelocities[offset] = Math.cos(angle) * speed;
-      particleVelocities[offset + 1] = Math.sin(angle) * speed;
-      particleVelocities[offset + 2] = this.rng.range(-2, 2);
+  addStyleScore(amount, label = "Style") {
+    if (this.activeCourseName() === "freestyle") {
+      this.styleScore += amount;
+      if (amount > 0) this.showStylePoints(amount, label);
     }
-    const particleGeometry = new THREE.BufferGeometry();
-    particleGeometry.setAttribute("position", new THREE.BufferAttribute(particlePositions, 3));
-    const particleMaterial = new THREE.PointsMaterial({
-      color: correctSide ? 0x005dff : 0xff2a00,
-      size: 4.8,
-      transparent: true,
-      opacity: 0.9,
-      sizeAttenuation: false,
-      depthTest: false,
-      depthWrite: false
-    });
-    const particles = new THREE.Points(particleGeometry, particleMaterial);
-    particles.renderOrder = 95001;
-    group.add(particles);
-
-    const effect = {
-      age: 0,
-      duration: GATE_PASS_EFFECT_SECONDS,
-      group,
-      ring,
-      glow,
-      particles,
-      particlePositions,
-      particleVelocities,
-      geometries: [ring.geometry, glow.geometry, particleGeometry],
-      materials: [ringMaterial, glowMaterial, particleMaterial]
-    };
-    this.scene.add(group);
-    this.gateEffects.push(effect);
-  }
-
-  updateGatePassEffects(dt) {
-    if (!this.gateEffects.length) return;
-    this.gateEffects = this.gateEffects.filter((effect) => {
-      effect.age += dt;
-      const t = Math.min(1, effect.age / effect.duration);
-      const fade = (1 - t) * (1 - t);
-      effect.ring.scale.setScalar(1 + t * 2.4);
-      effect.glow.scale.setScalar(0.8 + t * 2.9);
-      effect.ring.material.opacity = 0.82 * fade;
-      effect.glow.material.opacity = 0.5 * fade;
-      effect.particles.material.opacity = 0.9 * fade;
-
-      for (let i = 0; i < GATE_PASS_EFFECT_PARTICLES; i += 1) {
-        const offset = i * 3;
-        effect.particlePositions[offset] = effect.particleVelocities[offset] * effect.age;
-        effect.particlePositions[offset + 1] = effect.particleVelocities[offset + 1] * effect.age;
-        effect.particlePositions[offset + 2] = effect.particleVelocities[offset + 2] * effect.age;
-      }
-      effect.particles.geometry.attributes.position.needsUpdate = true;
-
-      if (effect.age < effect.duration) return true;
-      this.removeGatePassEffect(effect);
-      return false;
-    });
-  }
-
-  removeGatePassEffect(effect) {
-    this.scene.remove(effect.group);
-    for (const geometry of effect.geometries) geometry.dispose();
-    for (const material of effect.materials) material.dispose();
   }
 
   applyPointerState() {
-    if (!this.input.pointerActive || this.player.actionTimer > 0) return;
+    if (!this.input.pointerActive) return;
     if (this.player.state === PLAYER_STATE.CRASHED || this.player.state === PLAYER_STATE.FALLEN) return;
+    if (this.player.manualTrickTimer > 0) return;
 
     const anchorX = this.viewport.width / 2;
     const anchorY = this.viewport.height / 3;
     const dx = this.input.pointerX - anchorX;
     const dy = this.input.pointerY - anchorY;
     const nextState = this.player.mode === 0
-      ? this.mapMouseDirection(dx, dy)
-      : this.mapTrickDirection(dx, dy);
+      ? this.mapMouseDirection(dy, dx)
+      : this.mapTrickDirection(dy, dx);
     this.setPlayerState(nextState);
   }
 
   mapMouseDirection(dx, dy) {
-    if (dy < -18) {
-      return dx < 0 ? PLAYER_STATE.LEFT_3 : PLAYER_STATE.RIGHT_3;
+    if (dx > 0) {
+      if (dy === 0) return PLAYER_STATE.STRAIGHT;
+      const slope = Math.trunc((dx * 4) / dy);
+      if (slope <= -12) return PLAYER_STATE.STRAIGHT;
+      if (slope <= -6) return PLAYER_STATE.LEFT_1;
+      if (slope <= -3) return PLAYER_STATE.LEFT_2;
+      if (slope <= -1) return PLAYER_STATE.LEFT_3;
+      if (slope >= 12) return PLAYER_STATE.STRAIGHT;
+      if (slope >= 6) return PLAYER_STATE.RIGHT_1;
+      if (slope >= 3) return PLAYER_STATE.RIGHT_2;
+      if (slope >= 1) return PLAYER_STATE.RIGHT_3;
     }
-    const denom = Math.abs(dy) < 1 ? 1 : dy;
-    const slope = (dx * 4) / denom;
-    if (slope < -6) return PLAYER_STATE.LEFT_3;
-    if (slope < -3) return PLAYER_STATE.LEFT_2;
-    if (slope < -1) return PLAYER_STATE.LEFT_1;
-    if (slope <= 1) return PLAYER_STATE.STRAIGHT;
-    if (slope <= 3) return PLAYER_STATE.RIGHT_1;
-    if (slope <= 6) return PLAYER_STATE.RIGHT_2;
-    return PLAYER_STATE.RIGHT_3;
+    return dy >= 0 ? PLAYER_STATE.RIGHT_3 : PLAYER_STATE.LEFT_3;
   }
 
-  mapTrickDirection(dx, dy) {
-    if (Math.abs(dx) > Math.abs(dy)) {
-      return dx < 0 ? PLAYER_STATE.TRICK_LEFT : PLAYER_STATE.TRICK_RIGHT;
+  mapTrickDirection(verticalDelta, horizontalDelta) {
+    if (Math.abs(horizontalDelta) > Math.abs(verticalDelta)) {
+      return horizontalDelta < 0 ? PLAYER_STATE.TRICK_LEFT : PLAYER_STATE.TRICK_RIGHT;
     }
-    return dy < 0 ? PLAYER_STATE.TRICK_BACK : PLAYER_STATE.TRICK;
+    return verticalDelta < 0 ? PLAYER_STATE.TRICK_BACK : PLAYER_STATE.TRICK;
   }
 
   updateCourseObjects(dt) {
     for (const object of this.objects) {
-      if (object.kind === OBJECT_KIND.DOG) {
+      if (object.kind === RIVAL_KIND) {
+        this.updatePlayerRival(object, dt);
+      } else if (object.kind === OBJECT_KIND.DOG) {
         this.updateDog(object, dt);
       } else if (object.kind === OBJECT_KIND.ANIMATED) {
         this.updateNpcSkier(object, dt);
+      } else if (object.kind === OBJECT_KIND.ACROBAT) {
+        this.updateAcrobat(object, dt);
+      } else if (object.kind === OBJECT_KIND.LIFT_CHAIR) {
+        this.updateLiftChair(object, dt);
       } else if (object.kind === OBJECT_KIND.FIRE) {
         object.stateTimer = (object.stateTimer || 0) + dt;
         if (object.stateTimer > 0.12) {
           object.stateTimer = 0;
-          object.spriteId += 1;
-          if (object.spriteId > 85) object.spriteId = 83;
-          this.refreshSprite(object);
+          const nextState = (object.state ?? 0x38) >= 0x3b ? 0x38 : (object.state ?? 0x38) + 1;
+          this.setObjectState(object, nextState);
         }
       } else if (object.kind === OBJECT_KIND.MONSTER) {
         this.updateMonster(object, dt);
       }
+    }
+
+    if (this.rng.int(0, 665) === 0) {
+      this.spawnTopAcrobat();
     }
 
     if (!this.monster && this.player.y > CHASE_DISTANCE) {
@@ -1031,7 +1046,19 @@ class SkiFreeGame {
         this.setObjectState(dog, this.rng.int(0, 31) === 1 ? DOG_STATES.WALK_B : DOG_STATES.BARK);
         break;
       case DOG_STATES.BARK:
-        this.setObjectState(dog, this.rng.int(0, 99) === 0 ? DOG_STATES.WALK_A : DOG_STATES.ALERT);
+        if (this.rng.int(0, 99) === 0) {
+          this.addObject({
+            kind: OBJECT_KIND.PATCH,
+            spriteId: SPRITE.YELLOW_PATCH,
+            x: dog.x - 4,
+            y: dog.y - 2,
+            collidable: true,
+            collisionScale: 0.82
+          });
+          this.setObjectState(dog, DOG_STATES.WALK_A);
+        } else {
+          this.setObjectState(dog, DOG_STATES.ALERT);
+        }
         break;
       default:
         this.setObjectState(dog, DOG_STATES.WALK_A);
@@ -1041,6 +1068,7 @@ class SkiFreeGame {
 
   updateNpcSkier(npc, dt) {
     npc.state ??= NPC_SKIER_STATES[0];
+    if (npc.state >= 0x19) return;
     const motion = NPC_SKIER_MOTION[npc.state] || NPC_SKIER_MOTION[NPC_SKIER_STATES[0]];
     npc.vx ??= motion.targetVx;
     npc.speed ??= motion.targetSpeed;
@@ -1049,19 +1077,176 @@ class SkiFreeGame {
     npc.x += npc.vx * dt * 60;
     npc.y += npc.speed * dt * 60;
 
-    npc.stateTimer = (npc.stateTimer || 0) + dt;
-    while (npc.stateTimer >= NPC_SKIER_STATE_SECONDS) {
-      npc.stateTimer -= NPC_SKIER_STATE_SECONDS;
-      this.setObjectState(npc, this.nextNpcSkierState(npc.state));
+    if (this.rng.int(0, 11) === 0) {
+      this.setObjectState(npc, NPC_SKIER_STATES[this.rng.int(0, NPC_SKIER_STATES.length - 1)]);
     }
   }
 
-  nextNpcSkierState(currentState) {
-    let nextState = currentState;
-    while (nextState === currentState) {
-      nextState = NPC_SKIER_STATES[this.rng.int(0, NPC_SKIER_STATES.length - 1)];
+  addPlayerRivals() {
+    const offsets = [-105, 70, -25];
+    for (let i = 0; i < RIVAL_COUNT; i += 1) {
+      const rival = this.addObject({
+        kind: RIVAL_KIND,
+        name: RIVAL_NAMES[i],
+        state: PLAYER_STATE.STRAIGHT,
+        spriteId: spriteForState(PLAYER_STATE.STRAIGHT),
+        x: (i - 1) * 72,
+        y: this.player.y + offsets[i],
+        desiredOffsetY: offsets[i],
+        laneOffset: (i - 1) * 115,
+        vx: 0,
+        speed: 3.4,
+        styleScore: 0,
+        actionTimer: 0,
+        actionDuration: 0,
+        actionElapsed: 0,
+        actionPeak: 0,
+        airHeight: 0,
+        nextDecision: 0.8 + i * 0.65,
+        collidable: false,
+        permanent: true
+      });
+      this.createRivalNametag(rival);
     }
-    return nextState;
+  }
+
+  createRivalNametag(rival) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 192;
+    canvas.height = 36;
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.magFilter = THREE.NearestFilter;
+    texture.minFilter = THREE.LinearFilter;
+    const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false });
+    rival.nameCanvas = canvas;
+    rival.nameTexture = texture;
+    rival.nameSprite = new THREE.Sprite(material);
+    rival.nameSprite.center.set(0.5, 0);
+    rival.nameSprite.scale.set(96, 18, 1);
+    this.scene.add(rival.nameSprite);
+    this.refreshRivalNametag(rival);
+  }
+
+  refreshRivalNametag(rival) {
+    const context = rival.nameCanvas.getContext("2d");
+    context.clearRect(0, 0, rival.nameCanvas.width, rival.nameCanvas.height);
+    context.font = "bold 20px 'MS Sans Serif', Arial";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    const text = `${rival.name}  ★${Math.floor(rival.styleScore)}`;
+    context.lineWidth = 5;
+    context.strokeStyle = "rgba(255,255,255,0.96)";
+    context.strokeText(text, 96, 18);
+    context.fillStyle = "#174f9e";
+    context.fillText(text, 96, 18);
+    rival.nameTexture.needsUpdate = true;
+  }
+
+  updatePlayerRival(rival, dt) {
+    rival.nextDecision -= dt;
+    const relativeY = rival.y - this.player.y;
+    const gapError = rival.desiredOffsetY - relativeY;
+    const rubberband = Math.max(-1.6, Math.min(2.15, gapError * 0.012));
+    const targetSpeed = Math.max(2.35, Math.min(6.25, this.player.speed + rubberband));
+    rival.speed += (targetSpeed - rival.speed) * Math.min(1, dt * 2.6);
+
+    const weave = Math.sin((this.elapsedMs * 0.00055) + rival.laneOffset) * 78;
+    const targetX = this.player.x + rival.laneOffset + weave;
+    const targetVx = Math.max(-2.4, Math.min(2.4, (targetX - rival.x) * 0.022));
+    rival.vx += (targetVx - rival.vx) * Math.min(1, dt * 3.2);
+    rival.x += rival.vx * dt * 60;
+    rival.y += rival.speed * dt * 60;
+
+    if (rival.actionTimer > 0) {
+      rival.actionTimer = Math.max(0, rival.actionTimer - dt);
+      rival.actionElapsed += dt;
+      const progress = Math.min(1, rival.actionElapsed / rival.actionDuration);
+      rival.airHeight = Math.sin(progress * Math.PI) * rival.actionPeak;
+      if (rival.actionTimer === 0) {
+        rival.airHeight = 0;
+        rival.styleScore += rival.pendingStyle;
+        rival.pendingStyle = 0;
+        this.refreshRivalNametag(rival);
+        this.setObjectState(rival, PLAYER_STATE.STRAIGHT);
+      }
+    } else {
+      const directionalState = rival.vx < -0.65
+        ? PLAYER_STATE.LEFT_2
+        : rival.vx > 0.65 ? PLAYER_STATE.RIGHT_2 : PLAYER_STATE.STRAIGHT;
+      this.setObjectState(rival, directionalState);
+      const rampAhead = this.objects.some((object) =>
+        (object.kind === OBJECT_KIND.RAMP || object.kind === OBJECT_KIND.BUMP || object.kind === OBJECT_KIND.MOGUL)
+        && object.y > rival.y && object.y - rival.y < 46 && Math.abs(object.x - rival.x) < 30
+      );
+      if (rampAhead || rival.nextDecision <= 0) {
+        this.startRivalTrick(rival, rampAhead);
+      }
+    }
+
+    // Emergency elastic bound: remains smooth in normal play, but prevents a rival
+    // from disappearing forever after pauses, crashes or debug-speed changes.
+    const maxGap = this.viewport.height * 0.72;
+    if (Math.abs(relativeY) > maxGap) {
+      rival.y += (this.player.y + rival.desiredOffsetY - rival.y) * Math.min(1, dt * 1.8);
+    }
+  }
+
+  startRivalTrick(rival, rampAssisted = false) {
+    rival.actionDuration = rampAssisted ? 0.86 : this.rng.range(0.52, 0.74);
+    rival.actionTimer = rival.actionDuration;
+    rival.actionElapsed = 0;
+    rival.actionPeak = rampAssisted ? 36 : this.rng.range(20, 30);
+    rival.pendingStyle = rampAssisted ? 20 : this.rng.int(5, 12);
+    rival.nextDecision = this.rng.range(3.2, 6.3);
+    const tricks = [PLAYER_STATE.TRICK, PLAYER_STATE.TRICK_LEFT, PLAYER_STATE.TRICK_RIGHT, PLAYER_STATE.TRICK_BACK];
+    this.setObjectState(rival, tricks[this.rng.int(0, tricks.length - 1)]);
+  }
+
+  updateAcrobat(acrobat, dt) {
+    acrobat.state ??= 0x1f;
+    acrobat.vx ??= acrobat.state === 0x1f ? -2.25 : 2.25;
+    acrobat.speed ??= 4.5;
+    acrobat.x += acrobat.vx * dt * 60;
+    acrobat.y += acrobat.speed * dt * 60;
+    acrobat.stateTimer = (acrobat.stateTimer || 0) + dt;
+    while (acrobat.stateTimer >= ACROBAT_STATE_SECONDS) {
+      acrobat.stateTimer -= ACROBAT_STATE_SECONDS;
+      let state = acrobat.state;
+      if (state === 0x1f && this.rng.int(0, 9) === 0) state = 0x20;
+      else if (state === 0x20 && this.rng.int(0, 9) === 0) state = 0x1f;
+      else if (state === 0x21) state = 0x20;
+      else if (state >= 0x22) state = state === 0x26 ? 0x20 : state + 1;
+      this.setObjectState(acrobat, state);
+    }
+  }
+
+  updateLiftChair(chair, dt) {
+    chair.y += chair.velocityY * dt * 60;
+    if (chair.state === 0x27 && this.rng.int(0, 999) === 0) {
+      this.addObject({
+        kind: OBJECT_KIND.ACROBAT,
+        state: 0x21,
+        spriteId: spriteForState(0x21),
+        x: chair.x,
+        y: chair.y,
+        vx: 0,
+        speed: 5.5,
+        collidable: true,
+        collisionScale: 0.65
+      });
+      this.setObjectState(chair, 0x28);
+    }
+    if (chair.y <= LIFT_MIN_Y) {
+      chair.y = LIFT_MIN_Y;
+      chair.x = -0x0090;
+      chair.velocityY = 2;
+      this.setObjectState(chair, 0x29);
+    } else if (chair.y >= LIFT_MAX_Y) {
+      chair.y = LIFT_MAX_Y;
+      chair.x = -0x0070;
+      chair.velocityY = -2;
+      this.setObjectState(chair, 0x27);
+    }
   }
 
   setObjectState(object, state) {
@@ -1167,93 +1352,9 @@ class SkiFreeGame {
     this.syncPlayerDataset();
   }
 
-  updateTrails() {
-    if (this.player.state === PLAYER_STATE.CRASHED || this.player.actionTimer > 0) {
-      if (this.skiTracks) this.skiTracks.previous = null;
-      return;
-    }
-    this.updateSkiTrackMarks();
-  }
-
-  updateSkiTrackMarks() {
-    const tracks = this.skiTracks;
-    if (!tracks || !this.player || this.player.speed <= 0.35) {
-      if (tracks) tracks.previous = null;
-      return;
-    }
-
-    const current = { x: this.player.x, y: this.player.y };
-    if (!tracks.previous) {
-      tracks.previous = current;
-      return;
-    }
-
-    const dx = current.x - tracks.previous.x;
-    const dy = current.y - tracks.previous.y;
-    const distance = Math.hypot(dx, dy);
-    if (distance > SKI_TRACK_RESET_DISTANCE) {
-      tracks.previous = current;
-      return;
-    }
-    if (distance < SKI_TRACK_SAMPLE_DISTANCE) return;
-
-    this.appendSkiTrackSegment(tracks.previous, current);
-    tracks.previous = current;
-  }
-
-  appendSkiTrackSegment(previous, current) {
-    const tracks = this.skiTracks;
-    const dx = current.x - previous.x;
-    const dy = current.y - previous.y;
-    const length = Math.hypot(dx, dy) || 1;
-    const nx = -dy / length;
-    const ny = dx / length;
-    const separation = SKI_TRACK_SEPARATION / 2;
-    const halfWidth = SKI_TRACK_WIDTH / 2;
-
-    let segmentIndex = tracks.segmentCount;
-    if (tracks.segmentCount >= tracks.maxSegments) {
-      tracks.positions.copyWithin(0, tracks.floatsPerSegment);
-      segmentIndex = tracks.maxSegments - 1;
-    } else {
-      tracks.segmentCount += 1;
-    }
-
-    const writeQuad = (base, side) => {
-      const centerOffset = side * separation;
-      const edgeOffset = halfWidth;
-      const p1a = this.trackPoint(previous, nx, ny, centerOffset - edgeOffset);
-      const p1b = this.trackPoint(previous, nx, ny, centerOffset + edgeOffset);
-      const p2a = this.trackPoint(current, nx, ny, centerOffset - edgeOffset);
-      const p2b = this.trackPoint(current, nx, ny, centerOffset + edgeOffset);
-      const values = [
-        p1a.x, p1a.y, SKI_TRACK_Z,
-        p2a.x, p2a.y, SKI_TRACK_Z,
-        p2b.x, p2b.y, SKI_TRACK_Z,
-        p1a.x, p1a.y, SKI_TRACK_Z,
-        p2b.x, p2b.y, SKI_TRACK_Z,
-        p1b.x, p1b.y, SKI_TRACK_Z
-      ];
-      tracks.positions.set(values, base);
-    };
-
-    const base = segmentIndex * tracks.floatsPerSegment;
-    writeQuad(base, -1);
-    writeQuad(base + tracks.floatsPerSegment / 2, 1);
-    tracks.geometry.setDrawRange(0, tracks.segmentCount * 12);
-    tracks.geometry.attributes.position.needsUpdate = true;
-  }
-
-  trackPoint(point, nx, ny, offset) {
-    return {
-      x: point.x + nx * offset,
-      y: -point.y - ny * offset
-    };
-  }
-
   checkCollisions() {
     const player = this.player;
-    if (player.actionTimer > 0 || player.state === PLAYER_STATE.CRASHED) return;
+    if (player.state === PLAYER_STATE.CRASHED || player.state === PLAYER_STATE.FALLEN) return;
 
     const playerBox = this.boundsFor(player, 0.55);
     for (const object of this.objects) {
@@ -1261,40 +1362,82 @@ class SkiFreeGame {
       if (Math.abs(object.y - player.y) > 60 || Math.abs(object.x - player.x) > 80) continue;
       if (!this.intersects(playerBox, this.boundsFor(object, object.collisionScale || 0.7))) continue;
 
-      if (object.kind === OBJECT_KIND.RAMP || object.kind === OBJECT_KIND.MOGUL || object.kind === OBJECT_KIND.PATCH) {
+      const canClearObstacle = player.airHeight > Math.max(8, (object.height || 16) * 0.72);
+      if (canClearObstacle && [OBJECT_KIND.TREE, OBJECT_KIND.OBSTACLE, OBJECT_KIND.DOG].includes(object.kind)) {
+        continue;
+      }
+
+      if (object.kind === OBJECT_KIND.RAMP || object.kind === OBJECT_KIND.BUMP || object.kind === OBJECT_KIND.MOGUL) {
         this.launchTrick(object.kind);
+        object.hit = true;
+      } else if (object.kind === OBJECT_KIND.PATCH) {
+        player.speed *= 0.5;
+        object.hit = true;
+      } else if (object.kind === OBJECT_KIND.DOG) {
+        player.speed *= 0.5;
+        this.setObjectState(object, DOG_STATES.ALERT);
         object.hit = true;
       } else if (object.kind === OBJECT_KIND.SIGN) {
         object.hit = true;
-        this.addStyleScore(5);
       } else if (object.kind === OBJECT_KIND.MONSTER) {
         this.startYetiAttack(object);
       } else {
+        if (object.kind === OBJECT_KIND.ANIMATED && object.state < 0x19) {
+          this.setObjectState(object, player.mode > 0 ? 0x1a : 0x19);
+        } else if (object.kind === OBJECT_KIND.ACROBAT) {
+          this.setObjectState(object, 0x22);
+          this.addStyleScore(20);
+        } else if (object.kind === OBJECT_KIND.OBSTACLE && object.spriteId === SPRITE.STUMP && player.airHeight > 0) {
+          object.spriteId = SPRITE.BROKEN_STUMP;
+          object.collidable = false;
+          this.refreshSprite(object);
+          player.speed *= 0.5;
+          continue;
+        }
         this.crashInto(object);
       }
     }
   }
 
   launchTrick(kind) {
-    this.player.pendingAction = kind === OBJECT_KIND.RAMP ? 4 : 2;
+    if (kind === OBJECT_KIND.MOGUL) this.player.pendingAction = 1;
+    else if (kind === OBJECT_KIND.BUMP) this.player.pendingAction = 4;
+    else this.player.pendingAction = Math.max(1, Math.round(this.player.speed));
     this.player.mode = 1;
-    this.player.actionTimer = kind === OBJECT_KIND.RAMP ? RAMP_TRICK_SECONDS : MOGUL_JUMP_SECONDS;
-    this.player.speed = Math.max(this.player.speed, kind === OBJECT_KIND.RAMP ? 4.55 : 4.05);
-    this.setPlayerState(kind === OBJECT_KIND.RAMP ? PLAYER_STATE.TRICK : PLAYER_STATE.JUMP_LEFT);
-    this.addStyleScore(kind === OBJECT_KIND.RAMP ? 20 : 6);
+    this.player.actionDuration = kind === OBJECT_KIND.RAMP
+      ? RAMP_TRICK_SECONDS
+      : kind === OBJECT_KIND.BUMP ? CLICK_TRICK_SECONDS : MOGUL_JUMP_SECONDS;
+    this.player.actionTimer = this.player.actionDuration;
+    this.player.actionElapsed = 0;
+    this.player.actionPeak = kind === OBJECT_KIND.RAMP ? 36 : kind === OBJECT_KIND.BUMP ? 30 : 18;
+    this.player.airHeight = 0;
+    this.player.speed = Math.max(this.player.speed, kind === OBJECT_KIND.RAMP ? 5.2 : 4.1);
+    this.setPlayerState(PLAYER_STATE.TRICK);
+    this.addStyleScore(kind === OBJECT_KIND.RAMP ? 20 : kind === OBJECT_KIND.BUMP ? 8 : 6);
   }
 
   crashInto(object) {
-    if (object.kind === OBJECT_KIND.DOG) {
-      this.setObjectState(object, DOG_STATES.ALERT);
-    }
-    this.player.speed *= object.kind === OBJECT_KIND.MONSTER ? 0.05 : 0.25;
+    const wasAirborne = this.player.mode > 0 || this.player.airHeight > 0;
+    this.player.speed *= 0.25;
     this.player.vx *= -0.25;
     this.player.actionTimer = 0;
+    this.player.actionDuration = 0;
+    this.player.actionElapsed = 0;
+    this.player.actionPeak = 0;
+    this.player.airHeight = 0;
     this.player.mode = 0;
-    this.player.crashedUntil = object.kind === OBJECT_KIND.MONSTER ? 2.6 : 1.4;
-    this.styleScore = Math.max(0, this.styleScore - 15);
-    this.setPlayerState(PLAYER_STATE.CRASHED);
+    this.player.crashedUntil = 1.4;
+    this.addStyleScore(-Math.min(15, this.styleScore));
+    this.setPlayerState(wasAirborne ? PLAYER_STATE.FALLEN : PLAYER_STATE.CRASHED);
+
+    if (wasAirborne && object.spriteId === SPRITE.TREE_DEAD) {
+      object.kind = OBJECT_KIND.FIRE;
+      object.state = 0x38;
+      object.spriteId = SPRITE.FIRE_FIRST;
+      object.collidable = false;
+      object.stateTimer = 0;
+      this.refreshSprite(object);
+    }
   }
 
   spawnCourseUntil(targetY) {
@@ -1304,80 +1447,102 @@ class SkiFreeGame {
     }
   }
 
+  spawnSideObjects() {
+    let delta = this.player.x - this.sideSpawnAnchorX;
+    const halfWidth = Math.max(360, this.viewport.width * 0.62);
+    while (delta >= COURSE_STEP) {
+      this.spawnWeightedObject(
+        this.player.x + halfWidth,
+        this.player.y + this.rng.range(-this.viewport.height * 0.35, this.viewport.height * 0.65)
+      );
+      this.sideSpawnAnchorX += COURSE_STEP;
+      delta -= COURSE_STEP;
+    }
+    while (delta <= -COURSE_STEP) {
+      this.spawnWeightedObject(
+        this.player.x - halfWidth,
+        this.player.y + this.rng.range(-this.viewport.height * 0.35, this.viewport.height * 0.65)
+      );
+      this.sideSpawnAnchorX -= COURSE_STEP;
+      delta += COURSE_STEP;
+    }
+  }
+
   spawnChunk(y) {
     if (y < 120) return;
 
-    const count = this.rng.int(3, y > 1000 ? 7 : 5);
     const halfWidth = Math.max(360, this.viewport.width * 0.62);
-    this.spawnFeatureObjects(y, halfWidth);
-    for (let i = 0; i < count; i += 1) {
-      const x = this.rng.range(-halfWidth, halfWidth);
-      const offsetY = y + this.rng.range(-46, 58);
-      if (Math.abs(x) < 72 && offsetY < 520) continue;
-      this.spawnWeightedObject(x, offsetY);
-    }
-  }
-
-  spawnFeatureObjects(y, halfWidth) {
-    const chunkIndex = Math.floor(y / COURSE_STEP);
-    if (y > 560 && chunkIndex % 4 === 0) {
-      this.addRamp(this.rng.range(-120, 120), y + this.rng.range(-24, 34));
-    }
-    if (y > 720 && chunkIndex % 5 === 0) {
-      this.addNpcSkier(this.rng.range(-halfWidth * 0.42, halfWidth * 0.42), y - this.rng.range(80, 160));
-    }
-    if (y > 840 && chunkIndex % 6 === 0) {
-      const side = chunkIndex % 12 === 0 ? -1 : 1;
-      this.addTower(side * this.rng.range(halfWidth * 0.45, halfWidth * 0.82), y + this.rng.range(-20, 50));
-    }
+    const x = this.player.x + this.rng.range(-halfWidth, halfWidth);
+    const offsetY = y + this.rng.range(-30, 30);
+    if (Math.abs(x) < 72 && offsetY < 520) return;
+    this.spawnWeightedObject(x, offsetY);
   }
 
   spawnWeightedObject(x, y) {
-    const choice = this.rng.weighted([
-      { weight: 22, value: "tree" },
-      { weight: 12, value: "rock" },
-      { weight: 12, value: "stump" },
-      { weight: 16, value: "mogul" },
-      { weight: 16, value: "ramp" },
-      { weight: 7, value: "dog" },
-      { weight: 7, value: "npc" },
-      { weight: 5, value: "tower" },
-      { weight: 4, value: "fire" },
-      { weight: 7, value: "patch" }
-    ]);
+    let choice;
+    if (x >= COURSE_LANES.race.startMinX && x <= COURSE_LANES.race.startMaxX && y >= RACE_START_Y && y <= RACE_FINISH_Y) {
+      choice = "mogul";
+    } else if (x >= COURSE_LANES.treeSlalom.startMinX && x <= COURSE_LANES.treeSlalom.startMaxX && y >= RACE_START_Y && y <= LONG_COURSE_FINISH_Y) {
+      choice = this.rng.int(0, 63) === 0 ? "dog" : "tree";
+    } else if (x >= COURSE_LANES.freestyle.startMinX && x <= COURSE_LANES.freestyle.startMaxX && y >= RACE_START_Y && y <= LONG_COURSE_FINISH_Y) {
+      choice = this.rng.weighted([
+        { weight: 2, value: "tree" },
+        { weight: 3, value: "bump" },
+        { weight: 1, value: "mogul" },
+        { weight: 2, value: "obstacle" },
+        { weight: 2, value: "ramp" }
+      ]);
+    } else {
+      choice = this.rng.weighted([
+        { weight: 500, value: "tree" },
+        { weight: 200, value: "bump" },
+        { weight: 50, value: "mogul" },
+        { weight: 200, value: "obstacle" },
+        { weight: 20, value: "ramp" },
+        { weight: 20, value: "npc" },
+        { weight: 10, value: "dog" }
+      ]);
+    }
 
     if (choice === "tree") {
-      const spriteId = this.rng.weighted([
-        { weight: 5, value: SPRITE.TREE_SMALL },
-        { weight: 2, value: SPRITE.TREE_DEAD },
-        { weight: 3, value: SPRITE.TREE_LARGE }
-      ]);
-      this.addObject({ kind: OBJECT_KIND.TREE, spriteId, x, y, collidable: true, collisionScale: 0.58 });
-    } else if (choice === "rock") {
-      this.addObject({ kind: OBJECT_KIND.ROCK, spriteId: SPRITE.ROCK, x, y, collidable: true, collisionScale: 0.62 });
-    } else if (choice === "stump") {
-      this.addObject({ kind: OBJECT_KIND.STUMP, spriteId: SPRITE.STUMP, x, y, collidable: true, collisionScale: 0.72 });
+      this.addTree(x, y);
+    } else if (choice === "obstacle") {
+      const spriteId = this.rng.int(0, 3) === 0 ? SPRITE.STUMP : SPRITE.ROCK;
+      this.addObject({ kind: OBJECT_KIND.OBSTACLE, spriteId, x, y, collidable: true, collisionScale: 0.68 });
     } else if (choice === "mogul") {
-      this.addObject({ kind: OBJECT_KIND.MOGUL, spriteId: 27, x, y, collidable: true, collisionScale: 0.74 });
+      this.addObject({ kind: OBJECT_KIND.MOGUL, spriteId: SPRITE.MOGULS, x, y, collidable: true, collisionScale: 0.74 });
+    } else if (choice === "bump") {
+      this.addBump(x, y);
     } else if (choice === "ramp") {
       this.addRamp(x, y);
     } else if (choice === "dog") {
       this.addDog(x, y);
     } else if (choice === "npc") {
       this.addNpcSkier(x, y);
-    } else if (choice === "tower") {
-      this.addTower(x, y);
-    } else if (choice === "fire") {
-      this.addObject({ kind: OBJECT_KIND.FIRE, spriteId: SPRITE.FIRE_FIRST, x, y, collidable: true, collisionScale: 0.66 });
-    } else {
-      this.addObject({ kind: OBJECT_KIND.PATCH, spriteId: SPRITE.YELLOW_PATCH, x, y, collidable: true, collisionScale: 0.82 });
     }
+  }
+
+  addTree(x, y) {
+    const roll = this.rng.int(0, 7);
+    const spriteId = roll === 0 ? SPRITE.TREE_DEAD : roll === 1 ? SPRITE.TREE_LARGE : SPRITE.TREE_SMALL;
+    return this.addObject({ kind: OBJECT_KIND.TREE, spriteId, x, y, collidable: true, collisionScale: 0.58 });
+  }
+
+  addBump(x, y) {
+    return this.addObject({
+      kind: OBJECT_KIND.BUMP,
+      spriteId: this.rng.int(0, 2) === 0 ? SPRITE.BUMP_LARGE : SPRITE.BUMP_SMALL,
+      x,
+      y,
+      collidable: true,
+      collisionScale: 0.76
+    });
   }
 
   addRamp(x, y) {
     return this.addObject({
       kind: OBJECT_KIND.RAMP,
-      spriteId: this.rng.chance(0.5) ? SPRITE.RAMP_1 : SPRITE.RAMP_2,
+      spriteId: SPRITE.RAMP,
       x,
       y,
       collidable: true,
@@ -1410,36 +1575,43 @@ class SkiFreeGame {
       y,
       vx: motion.targetVx + this.rng.range(-0.12, 0.12),
       speed: motion.targetSpeed + this.rng.range(-0.2, 0.2),
-      stateTimer: this.rng.range(0, NPC_SKIER_STATE_SECONDS),
       collidable: true,
       collisionScale: 0.62
     });
   }
 
-  addTower(x, y) {
+  addAcrobat(x, y) {
+    const state = this.rng.chance(0.5) ? 0x1f : 0x20;
     return this.addObject({
-      kind: OBJECT_KIND.TOWER,
-      spriteId: SPRITE.SKI_LIFT_TOWER,
+      kind: OBJECT_KIND.ACROBAT,
+      state,
+      spriteId: spriteForState(state),
       x,
       y,
+      vx: state === 0x1f ? -2.25 : 2.25,
+      speed: 4.5,
       collidable: true,
-      collisionScale: 0.48
+      collisionScale: 0.65
     });
+  }
+
+  spawnTopAcrobat() {
+    return this.addAcrobat(
+      this.player.x + this.rng.range(-this.viewport.width * 0.46, this.viewport.width * 0.46),
+      this.player.y - this.viewport.height * 0.36 - 36
+    );
   }
 
   pruneObjects() {
     const lowWater = this.player.y - this.viewport.height * 1.35;
+    const sideWater = Math.max(720, this.viewport.width * 1.65);
     this.objects = this.objects.filter((object) => {
-      if (object.y >= lowWater || object.kind === OBJECT_KIND.MONSTER) return true;
+      if (object.permanent || object.kind === OBJECT_KIND.MONSTER) return true;
+      if (object.y >= lowWater && Math.abs(object.x - this.player.x) <= sideWater) return true;
       this.removeSprite(object);
       return false;
     });
 
-    this.trails = this.trails.filter((trail) => {
-      if (trail.y >= lowWater) return true;
-      this.scene.remove(trail.sprite);
-      return false;
-    });
   }
 
   addObject(object) {
@@ -1451,6 +1623,7 @@ class SkiFreeGame {
 
   attachSprite(object) {
     const sprite = new THREE.Sprite(this.assets.material(object.spriteId));
+    sprite.center.set(0.5, 0);
     object.sprite = sprite;
     this.scene.add(sprite);
     this.updateObjectSprite(object);
@@ -1465,6 +1638,12 @@ class SkiFreeGame {
     if (!object.sprite) return;
     this.scene.remove(object.sprite);
     object.sprite = null;
+    if (object.nameSprite) {
+      this.scene.remove(object.nameSprite);
+      object.nameSprite.material.dispose();
+      object.nameTexture?.dispose();
+      object.nameSprite = null;
+    }
   }
 
   updateObjectSprite(object) {
@@ -1477,15 +1656,16 @@ class SkiFreeGame {
 
   positionSprite(object) {
     if (!object.sprite) return;
-    object.sprite.position.set(object.x, -object.y, this.depthForObject(object));
+    object.sprite.position.set(object.x, -object.y + (object.airHeight || 0), this.depthForObject(object));
     object.sprite.renderOrder = Math.floor(object.y);
+    if (object.nameSprite) {
+      object.nameSprite.position.set(object.x, -object.y + (object.airHeight || 0) + object.height + 4, 1);
+      object.nameSprite.renderOrder = Math.floor(object.y) + 2;
+    }
   }
 
   depthForObject(object) {
-    if (!this.player) return 0;
-    if (object.kind === OBJECT_KIND.PLAYER) return CAMERA_PLAYER_DEPTH;
-    const relativeCourseY = (object.y - this.player.y) / Math.max(1, this.viewport.height);
-    return Math.max(-CAMERA_DEPTH_RANGE, Math.min(CAMERA_DEPTH_RANGE, relativeCourseY * CAMERA_DEPTH_RANGE));
+    return object.kind === OBJECT_KIND.PLAYER ? CAMERA_PLAYER_DEPTH : 0;
   }
 
   setPlayerState(state) {
@@ -1507,14 +1687,18 @@ class SkiFreeGame {
     this.canvas.dataset.playerMode = String(this.player.mode);
     this.canvas.dataset.playerActionTimer = this.player.actionTimer.toFixed(3);
     this.canvas.dataset.simulationFps = String(SIMULATION_FPS);
-    this.canvas.dataset.cameraMode = "perspective-depth";
+    this.canvas.dataset.cameraMode = "orthographic-2d";
     this.canvas.dataset.cameraDepthRange = String(CAMERA_DEPTH_RANGE);
-    this.canvas.dataset.snowParticles = String(SNOW_PARTICLE_COUNT);
-    this.canvas.dataset.snowFieldWidth = String(Math.round(this.snow?.fieldWidth || 0));
-    this.canvas.dataset.snowFieldHeight = String(Math.round(this.snow?.fieldHeight || 0));
-    this.canvas.dataset.skiTrackSegments = String(this.skiTracks?.segmentCount || 0);
+    this.canvas.dataset.snowParticles = String(this.snow?.count || 0);
+    this.canvas.dataset.snowFieldWidth = String(Math.floor(this.snow?.fieldWidth || 0));
+    this.canvas.dataset.snowFieldHeight = String(Math.floor(this.snow?.fieldHeight || 0));
+    this.canvas.dataset.skiTrackSegments = String(this.skiTracks?.segments || 0);
     this.canvas.dataset.skiTrackMaxSegments = String(SKI_TRACK_MAX_SEGMENTS);
-    this.canvas.dataset.gateEffectCount = String(this.gateEffects?.length || 0);
+    this.canvas.dataset.styleEffectCount = String(this.styleEffects?.childElementCount || 0);
+    const rivals = this.objects?.filter((object) => object.kind === RIVAL_KIND) || [];
+    this.canvas.dataset.rivalCount = String(rivals.length);
+    this.canvas.dataset.rivalScores = rivals.map((rival) => Math.floor(rival.styleScore)).join(",");
+    this.canvas.dataset.gateEffectCount = "0";
     this.canvas.dataset.gatePassCount = String(this.gatePassCount || 0);
     this.canvas.dataset.lastGateStyleAward = String(this.lastGateStyleAward || 0);
     this.canvas.dataset.yetiChaseDistanceMeters = String(YETI_CHASE_DISTANCE_METERS);
@@ -1533,11 +1717,12 @@ class SkiFreeGame {
   boundsFor(object, scale = 1) {
     const width = (object.width || 24) * scale;
     const height = (object.height || 24) * scale;
+    const bottom = object.y - (object.airHeight || 0);
     return {
       left: object.x - width / 2,
       right: object.x + width / 2,
-      top: object.y - height / 2,
-      bottom: object.y + height / 2
+      top: bottom - height,
+      bottom
     };
   }
 
@@ -1552,9 +1737,9 @@ class SkiFreeGame {
   }
 
   render() {
+    this.updatePlayerShadow();
     if (this.player) this.positionSprite(this.player);
     for (const object of this.objects) this.positionSprite(object);
-    for (const trail of this.trails) this.positionSprite(trail);
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -1576,12 +1761,10 @@ class SkiFreeGame {
   }
 
   hudDistanceMeters() {
-    const mode = this.displayCourseMode();
-    if (mode?.finished) return 0;
-    const finishY = mode?.finishY || null;
-    const distance = finishY == null
-      ? this.player.y
-      : finishY - this.player.y;
+    const activeMode = this.activeCourseMode();
+    const distance = activeMode
+      ? activeMode.finishY - this.player.y
+      : this.player.y;
     return Math.max(0, Math.floor(distance / PIXELS_PER_METER));
   }
 
@@ -1593,7 +1776,7 @@ class SkiFreeGame {
 
     this.hud.time.textContent = this.formatTime(this.hudTimeMs());
     this.hud.distance.textContent = `${distanceMeters}m`;
-    this.hud.speed.textContent = `${speedMeters.toFixed(2)}m/s`;
+    this.hud.speed.textContent = `${Math.floor(speedMeters)}m/s`;
     this.hud.style.textContent = `${Math.floor(this.styleScore)}`;
   }
 
@@ -1601,6 +1784,22 @@ class SkiFreeGame {
     this.input.pointerActive = true;
     this.input.pointerX = event.clientX;
     this.input.pointerY = event.clientY;
+  }
+
+  nextAirTrickState(state) {
+    const cycle = {
+      [PLAYER_STATE.TRICK]: PLAYER_STATE.SPIN,
+      [PLAYER_STATE.TRICK_LEFT]: PLAYER_STATE.FLIP_LEFT,
+      [PLAYER_STATE.TRICK_RIGHT]: PLAYER_STATE.FLIP_RIGHT,
+      [PLAYER_STATE.TRICK_BACK]: PLAYER_STATE.SPIN_BACK,
+      [PLAYER_STATE.SPIN]: PLAYER_STATE.SPIN_BACK,
+      [PLAYER_STATE.SPIN_BACK]: PLAYER_STATE.TRICK,
+      [PLAYER_STATE.FLIP_LEFT]: PLAYER_STATE.TRICK_LEFT,
+      [PLAYER_STATE.FLIP_RIGHT]: PLAYER_STATE.TRICK_RIGHT,
+      [PLAYER_STATE.JUMP_LEFT]: PLAYER_STATE.FLIP_LEFT,
+      [PLAYER_STATE.JUMP_RIGHT]: PLAYER_STATE.FLIP_RIGHT
+    };
+    return cycle[state] || PLAYER_STATE.TRICK;
   }
 
   onPointerDown(event) {
@@ -1616,25 +1815,20 @@ class SkiFreeGame {
       return;
     }
     if (this.player.state === PLAYER_STATE.CRASHED || this.player.state === PLAYER_STATE.FALLEN) {
-      this.restart();
       return;
     }
     if (this.player.mode === 0) {
       this.player.mode = 1;
       this.player.pendingAction = 4;
-      this.player.actionTimer = Math.max(this.player.actionTimer, CLICK_TRICK_SECONDS);
+      this.player.actionDuration = CLICK_TRICK_SECONDS;
+      this.player.actionElapsed = 0;
+      this.player.actionTimer = CLICK_TRICK_SECONDS;
+      this.player.manualTrickTimer = 0.2;
       this.setPlayerState(PLAYER_STATE.TRICK);
       this.addStyleScore(4);
     } else {
-      const cycle = {
-        [PLAYER_STATE.TRICK]: PLAYER_STATE.SPIN,
-        [PLAYER_STATE.TRICK_LEFT]: PLAYER_STATE.FLIP_LEFT,
-        [PLAYER_STATE.TRICK_RIGHT]: PLAYER_STATE.FLIP_RIGHT,
-        [PLAYER_STATE.SPIN]: PLAYER_STATE.SPIN_BACK,
-        [PLAYER_STATE.SPIN_BACK]: PLAYER_STATE.TRICK
-      };
-      this.player.actionTimer = Math.max(this.player.actionTimer, CLICK_TRICK_SECONDS);
-      this.setPlayerState(cycle[this.player.state] || PLAYER_STATE.TRICK);
+      this.player.manualTrickTimer = 0.2;
+      this.setPlayerState(this.nextAirTrickState(this.player.state));
       this.addStyleScore(3);
     }
   }
@@ -1675,39 +1869,46 @@ class SkiFreeGame {
     let nextState = state;
 
     if (code === "ArrowLeft" || code === "Numpad4") {
-      nextState = TURN_TRANSITION[state]?.[1] ?? state;
-      if (nextState === PLAYER_STATE.HARD_RIGHT) {
-        this.player.turnVelocity = Math.min(8, this.player.turnVelocity + 8);
-      }
-    } else if (code === "ArrowRight" || code === "Numpad6") {
       nextState = TURN_TRANSITION[state]?.[0] ?? state;
       if (nextState === PLAYER_STATE.HARD_LEFT) {
         this.player.turnVelocity = Math.max(-8, this.player.turnVelocity - 8);
+      }
+    } else if (code === "ArrowRight" || code === "Numpad6") {
+      nextState = TURN_TRANSITION[state]?.[1] ?? state;
+      if (nextState === PLAYER_STATE.HARD_RIGHT) {
+        this.player.turnVelocity = Math.min(8, this.player.turnVelocity + 8);
       }
     } else if (code === "ArrowUp" || code === "Numpad8") {
       nextState = this.upTransition(state);
     } else if (code === "ArrowDown" || code === "Numpad2") {
       nextState = this.downTransition(state);
     } else if (code === "PageUp" || code === "Numpad9") {
-      nextState = PLAYER_STATE.LEFT_3;
+      if (this.player.mode === 0) nextState = PLAYER_STATE.RIGHT_3;
     } else if (code === "PageDown" || code === "Numpad3") {
-      nextState = PLAYER_STATE.LEFT_1;
+      if (this.player.mode === 0) nextState = PLAYER_STATE.RIGHT_1;
     } else if (code === "Home" || code === "Numpad7") {
-      nextState = PLAYER_STATE.RIGHT_3;
+      if (this.player.mode === 0) nextState = PLAYER_STATE.LEFT_3;
     } else if (code === "End" || code === "Numpad1") {
-      nextState = PLAYER_STATE.RIGHT_1;
+      if (this.player.mode === 0) nextState = PLAYER_STATE.LEFT_1;
     } else if (code === "Insert" || code === "Numpad0" || code === "Space") {
-      this.player.mode = 1;
-      this.player.pendingAction = 2;
-      this.player.actionTimer = Math.max(this.player.actionTimer, KEY_TRICK_SECONDS);
-      nextState = PLAYER_STATE.TRICK;
-      this.addStyleScore(4);
+      if (this.player.mode === 0) {
+        this.player.mode = 1;
+        this.player.pendingAction = 2;
+        this.player.actionDuration = KEY_TRICK_SECONDS;
+        this.player.actionElapsed = 0;
+        this.player.actionTimer = KEY_TRICK_SECONDS;
+        nextState = PLAYER_STATE.TRICK;
+        this.addStyleScore(4);
+      } else {
+        nextState = this.nextAirTrickState(state);
+      }
     } else {
       return false;
     }
 
     this.setPlayerState(nextState);
-    if (this.isStyleState(nextState) && nextState !== state) {
+    if (this.player.mode > 0) this.player.manualTrickTimer = 0.2;
+    if (this.player.mode > 0 && this.isStyleState(nextState) && nextState !== state) {
       this.addStyleScore(2);
     }
     return true;
