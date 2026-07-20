@@ -126,7 +126,7 @@ async function inspectPage(page, viewportName) {
     || state.effects.snowFieldHeight < state.viewport.height) {
     throw new Error(`${viewportName}: snow field does not cover the viewport`);
   }
-  if (!state.hudText.includes("Time:") || !state.hudText.includes("Style:")) {
+  if (!state.hudText.includes("Tempo:") || !state.hudText.includes("Estilo:")) {
     throw new Error(`${viewportName}: HUD text missing expected status rows`);
   }
   if (state.hud.right > state.viewport.width || state.hud.bottom > state.viewport.height) {
@@ -138,7 +138,7 @@ async function inspectPage(page, viewportName) {
 
 async function verifyControls(page) {
   await page.keyboard.press("F3");
-  await page.waitForFunction(() => document.title.startsWith("Ski Paused"), null, { timeout: 3000 });
+  await page.waitForFunction(() => document.title.startsWith("Ski pausado"), null, { timeout: 3000 });
   const pausedVisible = await page.locator("#pause-card").isVisible();
   if (!pausedVisible) throw new Error("pause card was not visible after F3");
 

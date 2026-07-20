@@ -1,28 +1,34 @@
 <!doctype html>
-<html lang="en">
+<html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SkiFree</title>
     <link rel="icon" href="data:," />
-    <script type="module" crossorigin src="./assets/index-DGU9ue1K.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-BT-Cu8gJ.css">
+    <script type="module" crossorigin src="./assets/index-DACRem9F.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-Bry-fZfe.css">
   </head>
   <body>
     <main id="app">
       <canvas id="game"></canvas>
       <div id="style-effects" aria-live="polite" aria-atomic="false"></div>
-      <section id="hud" aria-label="SkiFree status">
+      <section id="hud" aria-label="Status do SkiFree">
         <div class="hud-title">SkiFree</div>
         <dl>
-          <div><dt>Time:</dt><dd id="time-value">0:00:00.00</dd></div>
-          <div><dt>Dist:</dt><dd id="distance-value">0m</dd></div>
-          <div><dt>Speed:</dt><dd id="speed-value">0m/s</dd></div>
-          <div><dt>Style:</dt><dd id="style-value">0</dd></div>
+          <div><dt>Tempo:</dt><dd id="time-value">0:00:00.00</dd></div>
+          <div><dt>Dist.:</dt><dd id="distance-value">0m</dd></div>
+          <div><dt>Veloc.:</dt><dd id="speed-value">0m/s</dd></div>
+          <div><dt>Estilo:</dt><dd id="style-value">0</dd></div>
         </dl>
       </section>
-      <div id="pause-card" hidden>Paused</div>
-      <div id="load-card">Loading</div>
+      <div id="pause-card" hidden>Pausado</div>
+      <section id="course-result-card" aria-label="Recordes" hidden>
+        <h2>Recordes</h2>
+        <div id="course-result-name"></div>
+        <ol id="course-result-list"></ol>
+        <div class="result-hint">Toque na tela ou pressione Enter para continuar</div>
+      </section>
+      <div id="load-card">Carregando</div>
     </main>
   </body>
 </html>

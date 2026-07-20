@@ -8,6 +8,12 @@ import {
   TURN_TRANSITION,
   spriteForState
 } from "./skiData.js";
+import {
+  advanceCrashRecovery,
+  classifyTouchGesture,
+  hasCollisionRecoveryProtection,
+  rankCourseResults
+} from "./gameRules.js";
 
 const SIMULATION_FPS = 60;
 const TICK_MS = 1000 / SIMULATION_FPS;
@@ -69,26 +75,26 @@ const SKI_TRACK_MAX_SEGMENTS = 900;
 const SKI_TRACK_SAMPLE_DISTANCE = 5;
 const SKI_TRACK_SEPARATION = 7;
 const RIVAL_KIND = "rival-player";
-const RIVAL_NAMES = ["PowderFox", "Mika", "IceByte", "AlpineAce"];
+const RIVAL_NAMES = ["RaposaNeve", "Mika", "ByteGelo", "ÁsAlpino"];
 const RIVAL_COUNT = 3;
 
 const COURSE_LANES = Object.freeze({
   race: {
-    label: "Race",
+    label: "Corrida",
     startMinX: -0x0240,
     startMaxX: -0x0140,
     signX: -448,
     finishY: RACE_FINISH_Y
   },
   freestyle: {
-    label: "Free style",
+    label: "Estilo livre",
     startMinX: -0x00a0,
     startMaxX: 0x00a0,
     signX: 0,
     finishY: LONG_COURSE_FINISH_Y
   },
   treeSlalom: {
-    label: "Tree Slalom",
+    label: "Slalom entre árvores",
     startMinX: 0x0140,
     startMaxX: 0x0200,
     signX: 416,
@@ -97,13 +103,18 @@ const COURSE_LANES = Object.freeze({
 });
 
 class SeededRandom {
-  constructor(seed = 0x51f15eed) {
+  constructor(seed = Date.now()) {
     this.state = seed >>> 0;
   }
 
+  step() {
+    // Microsoft C/Win16 LCG recovered from SKI.EXE internal ordinal 5.
+    this.state = (Math.imul(this.state, 0x000343fd) + 0x00269ec3) >>> 0;
+    return (this.state >>> 16) & 0x7fff;
+  }
+
   next() {
-    this.state = (1664525 * this.state + 1013904223) >>> 0;
-    return this.state / 0x100000000;
+    return this.step() / 0x8000;
   }
 
   range(min, max) {
@@ -111,7 +122,7 @@ class SeededRandom {
   }
 
   int(min, max) {
-    return Math.floor(this.range(min, max + 1));
+    return min + (this.step() % (max - min + 1));
   }
 
   chance(probability) {
@@ -218,6 +229,9 @@ class SkiFreeGame {
       style: document.querySelector("#style-value")
     };
     this.styleEffects = document.querySelector("#style-effects");
+    this.resultCard = document.querySelector("#course-result-card");
+    this.resultName = document.querySelector("#course-result-name");
+    this.resultList = document.querySelector("#course-result-list");
 
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
@@ -231,6 +245,7 @@ class SkiFreeGame {
     this.camera = new THREE.OrthographicCamera(-400, 400, 300, -300, -100, 100);
     this.camera.position.z = 10;
     this.assets = new AssetStore(`${import.meta.env.BASE_URL}assets/bitmaps`);
+    this.localizedMaterials = new Map();
 
     this.viewport = { width: 800, height: 600 };
     this.createSnowSystem();
@@ -240,7 +255,11 @@ class SkiFreeGame {
       pointerActive: false,
       pointerX: 0,
       pointerY: 0,
-      keys: new Set()
+      keys: new Set(),
+      touchPointerId: null,
+      touchDownAt: 0,
+      touchStartX: 0,
+      touchStartY: 0
     };
     this.lastTime = performance.now();
     this.accumulatorMs = 0;
@@ -258,6 +277,8 @@ class SkiFreeGame {
     window.addEventListener("keyup", (event) => this.input.keys.delete(event.code));
     window.addEventListener("pointermove", (event) => this.onPointerMove(event));
     window.addEventListener("pointerdown", (event) => this.onPointerDown(event));
+    window.addEventListener("pointerup", (event) => this.onPointerUp(event));
+    window.addEventListener("pointercancel", (event) => this.onPointerUp(event, true));
     window.addEventListener("blur", () => this.setPaused(true));
 
     this.resize();
@@ -279,6 +300,8 @@ class SkiFreeGame {
     this.camera.top = height / 2;
     this.camera.bottom = -height / 2;
     this.camera.updateProjectionMatrix();
+    this.input.pointerActive = false;
+    this.input.touchPointerId = null;
     this.resetSnowField();
     if (this.objects) {
       const helpX = width <= 640 ? 8 : Math.max(
@@ -317,9 +340,12 @@ class SkiFreeGame {
     this.courseModes = this.createCourseModes();
     this.paused = false;
     this.started = true;
+    this.input.pointerActive = false;
+    this.input.touchPointerId = null;
     document.title = "SkiFree";
-    this.pauseCard.textContent = "Paused";
+    this.pauseCard.textContent = "Pausado";
     this.pauseCard.hidden = true;
+    this.resultCard.hidden = true;
     this.styleEffects.replaceChildren();
     this.resetSkiTracks();
 
@@ -337,6 +363,7 @@ class SkiFreeGame {
       mode: 0,
       crashedUntil: 0,
       recoveryUntil: 0,
+      collisionGraceTimer: 0,
       actionDuration: 0,
       actionElapsed: 0,
       actionPeak: 0,
@@ -495,7 +522,7 @@ class SkiFreeGame {
     this.playerShadow.renderOrder = Math.floor(this.player.y) - 1;
   }
 
-  showStylePoints(points, label = "Style") {
+  showStylePoints(points, label = "Estilo") {
     if (points <= 0 || !this.styleEffects) return;
     const effect = document.createElement("div");
     effect.className = "style-popup";
@@ -612,6 +639,7 @@ class SkiFreeGame {
         x,
         y,
         introHelp,
+        localized: [SPRITE.HELP_MOUSE, SPRITE.HELP_KEYS].includes(spriteId),
         collidable: false,
         permanent: true
       });
@@ -642,6 +670,7 @@ class SkiFreeGame {
       x,
       y,
       courseLabel,
+      localized: true,
       collidable: false,
       permanent: true
     });
@@ -653,6 +682,7 @@ class SkiFreeGame {
       spriteId: leftSpriteId,
       x: x - halfWidth,
       y,
+      localized: true,
       collidable: false,
       permanent: true
     });
@@ -661,6 +691,7 @@ class SkiFreeGame {
       spriteId: rightSpriteId,
       x: x + halfWidth,
       y,
+      localized: true,
       collidable: false,
       permanent: true
     });
@@ -785,20 +816,8 @@ class SkiFreeGame {
       }
     }
 
-    if (player.crashedUntil > 0) {
-      player.crashedUntil = Math.max(0, player.crashedUntil - dt);
-      if (player.crashedUntil === 0 && (player.state === PLAYER_STATE.CRASHED || player.state === PLAYER_STATE.FALLEN)) {
-        player.recoveryUntil = 0.55;
-        this.setPlayerState(PLAYER_STATE.RECOVERING);
-      }
-    }
-
-    if (player.recoveryUntil > 0) {
-      player.recoveryUntil = Math.max(0, player.recoveryUntil - dt);
-      if (player.recoveryUntil === 0 && player.state === PLAYER_STATE.RECOVERING) {
-        this.setPlayerState(PLAYER_STATE.STRAIGHT);
-      }
-    }
+    const recoveryState = advanceCrashRecovery(player, dt);
+    if (recoveryState !== player.state) this.setPlayerState(recoveryState);
 
     const motion = PLAYER_MOTION[player.state] || PLAYER_MOTION[0];
     const profileVx = motion.vxRatio == null
@@ -867,7 +886,7 @@ class SkiFreeGame {
         this.refreshSprite(gate.marker);
       }
     });
-    this.courseMessage = `${mode.label} started`;
+    this.courseMessage = `Prova iniciada: ${mode.label}`;
   }
 
   finishCourseMode(mode) {
@@ -876,9 +895,57 @@ class SkiFreeGame {
     mode.resultMs = mode.elapsedMs + mode.penaltyMs;
     this.lastFinishedCourse = Object.entries(this.courseModes)
       .find(([, value]) => value === mode)?.[0] || "";
-    this.courseMessage = mode.label === "Free style"
-      ? `${mode.label} finished: ${Math.floor(this.styleScore)} style`
-      : `${mode.label} finished: ${this.formatTime(mode.resultMs)}`;
+    this.courseMessage = mode === this.courseModes.freestyle
+      ? `Prova concluída — ${mode.label}: ${Math.floor(this.styleScore)} pontos de estilo`
+      : `Prova concluída — ${mode.label}: ${this.formatTime(mode.resultMs)}`;
+    this.showCourseResults(this.lastFinishedCourse, mode);
+  }
+
+  showCourseResults(courseName, mode) {
+    const higherWins = courseName === "freestyle";
+    const value = higherWins ? Math.floor(this.styleScore) : Math.floor(mode.resultMs);
+    const storageKey = `skifree-high-scores:${courseName}`;
+    let saved = [];
+    try {
+      const parsed = JSON.parse(localStorage.getItem(storageKey) || "[]");
+      if (Array.isArray(parsed)) saved = parsed;
+    } catch {
+      saved = [];
+    }
+    const ranked = rankCourseResults(saved, value, higherWins);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(ranked.entries.map(({ value: score }) => ({ value: score }))));
+    } catch {
+      // Storage can be unavailable in privacy modes; the current result is still shown.
+    }
+
+    this.resultName.textContent = mode.label;
+    this.resultList.replaceChildren();
+    for (const [index, entry] of ranked.entries.entries()) {
+      const item = document.createElement("li");
+      const score = higherWins ? `${Math.floor(entry.value)} pontos` : this.formatTime(entry.value);
+      item.textContent = `${score}${entry.current ? "  ← seu resultado!" : ""}`;
+      if (entry.current) item.className = "current-result";
+      item.value = index + 1;
+      this.resultList.append(item);
+    }
+    if (ranked.rank < 0) {
+      const item = document.createElement("li");
+      item.className = "current-result unranked-result";
+      item.textContent = `${higherWins ? `${value} pontos` : this.formatTime(value)}  ← tente novamente!`;
+      this.resultList.append(item);
+    }
+    this.resultCard.hidden = false;
+    this.paused = true;
+    document.title = `SkiFree - Resultados de ${mode.label}`;
+  }
+
+  closeCourseResults() {
+    if (this.resultCard.hidden) return false;
+    this.resultCard.hidden = true;
+    this.paused = false;
+    document.title = "SkiFree";
+    return true;
   }
 
   checkCourseGates(mode, previousPlayer) {
@@ -893,7 +960,7 @@ class SkiFreeGame {
         this.gatePassCount += 1;
         this.styleScore += GATE_STYLE_POINTS;
         this.lastGateStyleAward = GATE_STYLE_POINTS;
-        this.showStylePoints(GATE_STYLE_POINTS, "Gate");
+        this.showStylePoints(GATE_STYLE_POINTS, "Bandeira");
       } else {
         gate.missed = true;
         mode.missedGates += 1;
@@ -918,7 +985,7 @@ class SkiFreeGame {
     return previous.x + (current.x - previous.x) * t;
   }
 
-  addStyleScore(amount, label = "Style") {
+  addStyleScore(amount, label = "Estilo") {
     if (this.activeCourseName() === "freestyle") {
       this.styleScore += amount;
       if (amount > 0) this.showStylePoints(amount, label);
@@ -1302,7 +1369,7 @@ class SkiFreeGame {
       monster
     };
     this.gameOver = false;
-    this.courseMessage = "Caught by the yeti";
+    this.courseMessage = "O Yeti pegou você";
     this.player.speed = 0;
     this.player.vx = 0;
     this.player.actionTimer = 0;
@@ -1318,7 +1385,7 @@ class SkiFreeGame {
     monster.spriteId = YETI_ATTACK_FRAMES[0];
     this.refreshSprite(monster);
     this.pauseCard.hidden = true;
-    document.title = "SkiFree - Caught by the yeti";
+    document.title = "SkiFree - O Yeti pegou você";
     this.syncPlayerDataset();
   }
 
@@ -1345,7 +1412,7 @@ class SkiFreeGame {
       attack.active = false;
       attack.finished = true;
       this.gameOver = true;
-      this.pauseCard.textContent = "Caught by the yeti";
+      this.pauseCard.textContent = "O Yeti pegou você";
       this.pauseCard.hidden = false;
     }
 
@@ -1354,7 +1421,7 @@ class SkiFreeGame {
 
   checkCollisions() {
     const player = this.player;
-    if (player.state === PLAYER_STATE.CRASHED || player.state === PLAYER_STATE.FALLEN) return;
+    if (hasCollisionRecoveryProtection(player)) return;
 
     const playerBox = this.boundsFor(player, 0.55);
     for (const object of this.objects) {
@@ -1395,6 +1462,7 @@ class SkiFreeGame {
           continue;
         }
         this.crashInto(object);
+        return;
       }
     }
   }
@@ -1622,7 +1690,10 @@ class SkiFreeGame {
   }
 
   attachSprite(object) {
-    const sprite = new THREE.Sprite(this.assets.material(object.spriteId));
+    const material = object.localized
+      ? this.localizedMaterial(object.spriteId)
+      : this.assets.material(object.spriteId);
+    const sprite = new THREE.Sprite(material);
     sprite.center.set(0.5, 0);
     object.sprite = sprite;
     this.scene.add(sprite);
@@ -1630,7 +1701,9 @@ class SkiFreeGame {
   }
 
   refreshSprite(object) {
-    object.sprite.material = this.assets.material(object.spriteId);
+    object.sprite.material = object.localized
+      ? this.localizedMaterial(object.spriteId)
+      : this.assets.material(object.spriteId);
     this.updateObjectSprite(object);
   }
 
@@ -1644,6 +1717,62 @@ class SkiFreeGame {
       object.nameTexture?.dispose();
       object.nameSprite = null;
     }
+  }
+
+  localizedMaterial(spriteId) {
+    if (this.localizedMaterials.has(spriteId)) return this.localizedMaterials.get(spriteId);
+    const labels = {
+      [SPRITE.HELP_MOUSE]: ["MOUSE/TOQUE", "MOVA PARA", "VIRAR"],
+      [SPRITE.HELP_KEYS]: ["TECLAS", "SETAS OU", "NUMPAD"],
+      [SPRITE.START_LEFT]: ["← INÍCIO"],
+      [SPRITE.START_RIGHT]: ["INÍCIO →"],
+      [SPRITE.FINISH_LEFT]: ["← FIM"],
+      [SPRITE.FINISH_RIGHT]: ["FIM →"],
+      [SPRITE.SLALOM_SIGN]: ["CORRIDA"],
+      [SPRITE.TREE_SLALOM_SIGN]: ["SLALOM", "ÁRVORES"],
+      [SPRITE.FREESTYLE_SIGN]: ["ESTILO", "LIVRE"]
+    };
+    const lines = labels[spriteId] || [""];
+    const { width, height } = this.assets.size(spriteId);
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    const isHelp = spriteId === SPRITE.HELP_MOUSE || spriteId === SPRITE.HELP_KEYS;
+    const panelHeight = isHelp ? height : Math.max(14, height - 10);
+    context.imageSmoothingEnabled = false;
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, width, panelHeight);
+    context.strokeStyle = isHelp ? "#ffffff" : "#101010";
+    context.lineWidth = 1;
+    if (!isHelp) context.strokeRect(0.5, 0.5, width - 1, panelHeight - 1);
+    context.fillStyle = "#174f9e";
+    context.font = `bold ${isHelp ? 7 : lines.length > 1 ? 7 : 8}px Arial`;
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    const lineHeight = isHelp ? 9 : 8;
+    const startY = panelHeight / 2 - ((lines.length - 1) * lineHeight) / 2;
+    lines.forEach((line, index) => context.fillText(line, width / 2, startY + index * lineHeight));
+    if (!isHelp && panelHeight < height) {
+      context.strokeStyle = "#101010";
+      context.beginPath();
+      context.moveTo(width / 2, panelHeight);
+      context.lineTo(width / 2, height);
+      context.stroke();
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.magFilter = THREE.NearestFilter;
+    texture.minFilter = THREE.NearestFilter;
+    texture.generateMipmaps = false;
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      alphaTest: 0.05,
+      depthTest: false,
+      depthWrite: false
+    });
+    this.localizedMaterials.set(spriteId, material);
+    return material;
   }
 
   updateObjectSprite(object) {
@@ -1781,6 +1910,7 @@ class SkiFreeGame {
   }
 
   onPointerMove(event) {
+    if (event.pointerType === "touch" && this.input.touchPointerId !== event.pointerId) return;
     this.input.pointerActive = true;
     this.input.pointerX = event.clientX;
     this.input.pointerY = event.clientY;
@@ -1803,9 +1933,7 @@ class SkiFreeGame {
   }
 
   onPointerDown(event) {
-    this.input.pointerActive = true;
-    this.input.pointerX = event.clientX;
-    this.input.pointerY = event.clientY;
+    if (this.closeCourseResults()) return;
     if (this.gameOver || this.yetiAttack.finished) {
       this.restart();
       return;
@@ -1817,6 +1945,37 @@ class SkiFreeGame {
     if (this.player.state === PLAYER_STATE.CRASHED || this.player.state === PLAYER_STATE.FALLEN) {
       return;
     }
+    this.input.pointerActive = true;
+    this.input.pointerX = event.clientX;
+    this.input.pointerY = event.clientY;
+    if (event.pointerType === "touch") {
+      event.preventDefault();
+      this.input.touchPointerId = event.pointerId;
+      this.input.touchDownAt = performance.now();
+      this.input.touchStartX = event.clientX;
+      this.input.touchStartY = event.clientY;
+      return;
+    }
+    this.performPointerAction();
+  }
+
+  onPointerUp(event, cancelled = false) {
+    if (event.pointerType !== "touch" || this.input.touchPointerId !== event.pointerId) return;
+    event.preventDefault();
+    const heldMs = performance.now() - this.input.touchDownAt;
+    const moved = Math.hypot(
+      event.clientX - this.input.touchStartX,
+      event.clientY - this.input.touchStartY
+    );
+    this.input.touchPointerId = null;
+    this.input.pointerActive = false;
+    if (classifyTouchGesture(heldMs, moved, cancelled) !== "tap") return;
+    if (this.paused || this.gameOver || this.yetiAttack.active) return;
+    if (this.player.state === PLAYER_STATE.CRASHED || this.player.state === PLAYER_STATE.FALLEN) return;
+    this.performPointerAction();
+  }
+
+  performPointerAction() {
     if (this.player.mode === 0) {
       this.player.mode = 1;
       this.player.pendingAction = 4;
@@ -1835,6 +1994,14 @@ class SkiFreeGame {
 
   onKeyDown(event) {
     this.input.keys.add(event.code);
+
+    if (!this.resultCard.hidden) {
+      if (["Enter", "Space", "Escape"].includes(event.code)) {
+        event.preventDefault();
+        this.closeCourseResults();
+      }
+      return;
+    }
 
     if (event.code === "F2" || event.key === "r") {
       event.preventDefault();
@@ -1969,10 +2136,15 @@ class SkiFreeGame {
   setPaused(paused) {
     if (!this.started) return;
     if (this.gameOver) return;
+    if (!this.resultCard.hidden) return;
     this.paused = paused;
-    this.pauseCard.textContent = "Paused";
+    if (paused) {
+      this.input.pointerActive = false;
+      this.input.touchPointerId = null;
+    }
+    this.pauseCard.textContent = "Pausado";
     this.pauseCard.hidden = !paused;
-    document.title = paused ? "Ski Paused ... Press F3 to continue" : "SkiFree";
+    document.title = paused ? "Ski pausado — pressione F3 para continuar" : "SkiFree";
   }
 }
 
@@ -1981,5 +2153,5 @@ window.skiFreeGame = game;
 game.start().catch((error) => {
   console.error(error);
   const loadCard = document.querySelector("#load-card");
-  loadCard.textContent = "Load failed";
+  loadCard.textContent = "Falha ao carregar";
 });

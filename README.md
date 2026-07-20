@@ -6,7 +6,8 @@ weights, controls, and collision behaviors recovered from the bundled
 handles the scene.
 
 Controls: mouse or numeric keypad to steer and perform tricks, arrow keys as
-the keypad equivalents, `F2` to restart, and `F3` to pause/resume.
+the keypad equivalents, `F2` to restart, and `F3` to pause/resume. On touch
+screens, hold and move a finger to steer; use a short tap to jump.
 
 Run it with:
 
@@ -29,3 +30,13 @@ Verify rendering and gameplay behavior with:
 cd skifree-three
 npm.cmd run verify
 ```
+
+The browser-free rules check (assets, recovered tables, recovery, and touch
+gestures) is available with:
+
+```powershell
+npm.cmd run verify:logic
+```
+
+See `ORIGINAL_PARITY_AUDIT.md` for the source-parity review and the explicitly
+documented web extensions.

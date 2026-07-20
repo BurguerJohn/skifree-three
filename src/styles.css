@@ -24,6 +24,7 @@ body {
 
 #app {
   position: relative;
+  touch-action: none;
 }
 
 #game {
@@ -32,6 +33,7 @@ body {
   height: 100%;
   image-rendering: pixelated;
   background: #ffffff;
+  touch-action: none;
 }
 
 #style-effects {
@@ -70,7 +72,7 @@ body {
   position: absolute;
   top: 10px;
   right: 10px;
-  min-width: 148px;
+  min-width: 168px;
   border: 1px solid #5f5f5f;
   border-radius: 0;
   background: #f2f2f2;
@@ -96,7 +98,7 @@ body {
 
 #hud dl > div {
   display: grid;
-  grid-template-columns: 48px minmax(76px, 1fr);
+  grid-template-columns: 58px minmax(76px, 1fr);
   gap: 8px;
   min-height: 18px;
   align-items: baseline;
@@ -132,11 +134,71 @@ body {
   user-select: none;
 }
 
+#course-result-card {
+  position: absolute;
+  z-index: 8;
+  left: 50%;
+  top: 50%;
+  width: min(330px, calc(100% - 28px));
+  max-height: calc(100% - 28px);
+  overflow: auto;
+  transform: translate(-50%, -50%);
+  border: 1px solid #454545;
+  background: #f2f2f2;
+  box-shadow: inset 1px 1px 0 #ffffff, inset -1px -1px 0 #8c8c8c, 4px 5px 0 rgba(0, 0, 0, 0.16);
+  padding: 0 14px 12px;
+  user-select: none;
+}
+
+#course-result-card h2 {
+  margin: 0 -14px 8px;
+  padding: 5px 8px;
+  background: #1f4f9c;
+  color: #ffffff;
+  font-size: 15px;
+}
+
+#course-result-name {
+  margin-bottom: 6px;
+  font-weight: 700;
+}
+
+#course-result-list {
+  margin: 0;
+  padding-left: 38px;
+  font-variant-numeric: tabular-nums;
+}
+
+#course-result-list li {
+  min-height: 19px;
+  padding-left: 4px;
+}
+
+#course-result-list .current-result {
+  color: #174f9e;
+  font-weight: 700;
+}
+
+.unranked-result {
+  list-style: none;
+  margin-left: -25px;
+  margin-top: 5px;
+}
+
+.result-hint {
+  margin-top: 9px;
+  border-top: 1px solid #aaa;
+  padding-top: 7px;
+  color: #555;
+  font-size: 11px;
+  text-align: center;
+}
+
 @media (max-width: 640px) {
   #hud {
     top: 6px;
     right: 6px;
-    min-width: 132px;
+    min-width: 152px;
     font-size: 12px;
   }
 
@@ -149,7 +211,7 @@ body {
   }
 
   #hud dl > div {
-    grid-template-columns: 42px minmax(66px, 1fr);
+    grid-template-columns: 54px minmax(66px, 1fr);
     gap: 5px;
   }
 }
