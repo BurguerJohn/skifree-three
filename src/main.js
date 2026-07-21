@@ -75,26 +75,167 @@ const SKI_TRACK_MAX_SEGMENTS = 900;
 const SKI_TRACK_SAMPLE_DISTANCE = 5;
 const SKI_TRACK_SEPARATION = 7;
 const RIVAL_KIND = "rival-player";
-const RIVAL_NAMES = ["RaposaNeve", "Mika", "ByteGelo", "ÁsAlpino"];
 const RIVAL_COUNT = 3;
+const LANGUAGE_STORAGE_KEY = "skifree-language";
+const DEFAULT_LANGUAGE = "en-US";
+const SUPPORTED_LANGUAGES = new Set(["pt-BR", "en-US"]);
+
+const TRANSLATIONS = Object.freeze({
+  "pt-BR": {
+    languageSwitcherAria: "Selecionar idioma",
+    hudAria: "Status do SkiFree",
+    resultsAria: "Recordes",
+    timeLabel: "Tempo:",
+    distanceLabel: "Dist.:",
+    speedLabel: "Veloc.:",
+    styleLabel: "Estilo:",
+    paused: "Pausado",
+    records: "Recordes",
+    resultHint: "Toque na tela ou pressione Enter para continuar",
+    loading: "Carregando",
+    loadFailed: "Falha ao carregar",
+    style: "Estilo",
+    flag: "Bandeira",
+    points: "{value} pontos",
+    yourResult: "seu resultado!",
+    tryAgain: "tente novamente!",
+    courseRace: "Corrida",
+    courseFreestyle: "Estilo livre",
+    courseTreeSlalom: "Slalom entre árvores",
+    courseStarted: "Prova iniciada: {mode}",
+    courseFinishedStyle: "Prova concluída — {mode}: {value} pontos de estilo",
+    courseFinishedTime: "Prova concluída — {mode}: {value}",
+    resultsTitle: "SkiFree - Resultados de {mode}",
+    yetiCaught: "O Yeti pegou você",
+    yetiTitle: "SkiFree - O Yeti pegou você",
+    pausedTitle: "Ski pausado — pressione F3 para continuar",
+    rivalNames: ["RaposaNeve", "Mika", "ByteGelo", "ÁsAlpino"],
+    signs: {
+      helpMouse: ["MOUSE/TOQUE", "MOVA PARA", "VIRAR"],
+      helpKeys: ["A/D, SETAS", "OU NUMPAD", "PARA VIRAR"],
+      startLeft: ["← INÍCIO"],
+      startRight: ["INÍCIO →"],
+      finishLeft: ["← FIM"],
+      finishRight: ["FIM →"],
+      race: ["CORRIDA"],
+      treeSlalom: ["SLALOM", "ÁRVORES"],
+      freestyle: ["ESTILO", "LIVRE"]
+    }
+  },
+  "en-US": {
+    languageSwitcherAria: "Select language",
+    hudAria: "SkiFree status",
+    resultsAria: "High scores",
+    timeLabel: "Time:",
+    distanceLabel: "Dist.:",
+    speedLabel: "Speed:",
+    styleLabel: "Style:",
+    paused: "Paused",
+    records: "High Scores",
+    resultHint: "Tap the screen or press Enter to continue",
+    loading: "Loading",
+    loadFailed: "Failed to load",
+    style: "Style",
+    flag: "Gate",
+    points: "{value} points",
+    yourResult: "your result!",
+    tryAgain: "try again!",
+    courseRace: "Race",
+    courseFreestyle: "Freestyle",
+    courseTreeSlalom: "Tree Slalom",
+    courseStarted: "Course started: {mode}",
+    courseFinishedStyle: "Course complete — {mode}: {value} style points",
+    courseFinishedTime: "Course complete — {mode}: {value}",
+    resultsTitle: "SkiFree - {mode} Results",
+    yetiCaught: "The Yeti got you",
+    yetiTitle: "SkiFree - The Yeti got you",
+    pausedTitle: "Ski paused — press F3 to continue",
+    rivalNames: ["SnowFox", "Mika", "IceByte", "AlpineAce"],
+    signs: {
+      helpMouse: ["MOUSE/TOUCH", "MOVE TO", "TURN"],
+      helpKeys: ["A/D, ARROWS", "OR NUMPAD", "TO TURN"],
+      startLeft: ["← START"],
+      startRight: ["START →"],
+      finishLeft: ["← FINISH"],
+      finishRight: ["FINISH →"],
+      race: ["RACE"],
+      treeSlalom: ["TREE", "SLALOM"],
+      freestyle: ["FREE", "STYLE"]
+    }
+  }
+});
+
+function translate(language, key, variables = {}) {
+  const value = TRANSLATIONS[language]?.[key] ?? TRANSLATIONS[DEFAULT_LANGUAGE][key] ?? key;
+  if (typeof value !== "string") return value;
+  return Object.entries(variables).reduce(
+    (text, [name, replacement]) => text.replaceAll(`{${name}}`, String(replacement)),
+    value
+  );
+}
+
+function storedLanguage() {
+  try {
+    const language = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+    return SUPPORTED_LANGUAGES.has(language) ? language : null;
+  } catch {
+    return null;
+  }
+}
+
+function browserSuggestsBrazil() {
+  const languages = navigator.languages?.length ? navigator.languages : [navigator.language];
+  if (languages.some((language) => language?.toLowerCase() === "pt-br")) return true;
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  return [
+    "America/Sao_Paulo", "America/Manaus", "America/Belem", "America/Fortaleza",
+    "America/Recife", "America/Maceio", "America/Bahia", "America/Cuiaba",
+    "America/Campo_Grande", "America/Porto_Velho", "America/Boa_Vista",
+    "America/Rio_Branco", "America/Noronha", "America/Araguaina",
+    "America/Santarem", "America/Eirunepe"
+  ].includes(timeZone);
+}
+
+async function detectInitialLanguage() {
+  const selected = storedLanguage();
+  if (selected) return selected;
+
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 1200);
+  try {
+    const response = await fetch(new URL("api/country", window.location.href), {
+      headers: { Accept: "application/json" },
+      signal: controller.signal
+    });
+    if (response.ok && response.headers.get("content-type")?.includes("application/json")) {
+      const { country } = await response.json();
+      if (country) return country.toUpperCase() === "BR" ? "pt-BR" : "en-US";
+    }
+  } catch {
+    // Local development has no edge country signal; browser hints are the fallback.
+  } finally {
+    window.clearTimeout(timeout);
+  }
+  return browserSuggestsBrazil() ? "pt-BR" : "en-US";
+}
 
 const COURSE_LANES = Object.freeze({
   race: {
-    label: "Corrida",
+    labelKey: "courseRace",
     startMinX: -0x0240,
     startMaxX: -0x0140,
     signX: -448,
     finishY: RACE_FINISH_Y
   },
   freestyle: {
-    label: "Estilo livre",
+    labelKey: "courseFreestyle",
     startMinX: -0x00a0,
     startMaxX: 0x00a0,
     signX: 0,
     finishY: LONG_COURSE_FINISH_Y
   },
   treeSlalom: {
-    label: "Slalom entre árvores",
+    labelKey: "courseTreeSlalom",
     startMinX: 0x0140,
     startMaxX: 0x0200,
     signX: 416,
@@ -218,7 +359,8 @@ class AssetStore {
 }
 
 class SkiFreeGame {
-  constructor() {
+  constructor(language = DEFAULT_LANGUAGE) {
+    this.language = SUPPORTED_LANGUAGES.has(language) ? language : DEFAULT_LANGUAGE;
     this.canvas = document.querySelector("#game");
     this.loadingCard = document.querySelector("#load-card");
     this.pauseCard = document.querySelector("#pause-card");
@@ -232,6 +374,7 @@ class SkiFreeGame {
     this.resultCard = document.querySelector("#course-result-card");
     this.resultName = document.querySelector("#course-result-name");
     this.resultList = document.querySelector("#course-result-list");
+    this.languageSwitcher = document.querySelector("#language-switcher");
 
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
@@ -269,9 +412,89 @@ class SkiFreeGame {
 
     this.resize = this.resize.bind(this);
     this.frame = this.frame.bind(this);
+    this.setLanguage(this.language, false);
+  }
+
+  t(key, variables = {}) {
+    return translate(this.language, key, variables);
+  }
+
+  setLanguage(language, persist = true) {
+    if (!SUPPORTED_LANGUAGES.has(language)) return;
+    this.language = language;
+    if (persist) {
+      try {
+        localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
+      } catch {
+        // The language still changes when storage is unavailable.
+      }
+    }
+
+    document.documentElement.lang = language;
+    document.querySelectorAll("[data-i18n]").forEach((element) => {
+      element.textContent = this.t(element.dataset.i18n);
+    });
+    document.querySelector("#hud")?.setAttribute("aria-label", this.t("hudAria"));
+    this.resultCard?.setAttribute("aria-label", this.t("resultsAria"));
+    this.languageSwitcher?.setAttribute("aria-label", this.t("languageSwitcherAria"));
+    this.languageSwitcher?.querySelectorAll("button[data-language]").forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.language === language));
+    });
+
+    if (this.courseModes) {
+      for (const mode of Object.values(this.courseModes)) mode.label = this.t(mode.labelKey);
+    }
+    if (this.objects) {
+      const names = this.t("rivalNames");
+      let rivalIndex = 0;
+      for (const object of this.objects) {
+        if (object.kind === RIVAL_KIND) {
+          object.name = names[rivalIndex] || object.name;
+          rivalIndex += 1;
+          if (object.nameSprite) this.refreshRivalNametag(object);
+        }
+      }
+    }
+    for (const material of this.localizedMaterials?.values() || []) {
+      material.map?.dispose();
+      material.dispose();
+    }
+    this.localizedMaterials?.clear();
+    if (this.objects) {
+      for (const object of this.objects) {
+        if (object.localized && object.sprite) this.refreshSprite(object);
+      }
+    }
+
+    if (this.currentCourseResult && !this.resultCard.hidden) {
+      this.renderCourseResults();
+      document.title = this.t("resultsTitle", { mode: this.currentCourseResult.mode.label });
+    } else if (this.gameOver || this.yetiAttack?.active) {
+      this.courseMessage = this.t("yetiCaught");
+      this.pauseCard.textContent = this.t("yetiCaught");
+      document.title = this.t("yetiTitle");
+    } else if (this.courseModes && this.activeCourseMode()) {
+      this.courseMessage = this.t("courseStarted", { mode: this.activeCourseMode().label });
+    } else if (this.paused) {
+      this.pauseCard.textContent = this.t("paused");
+      document.title = this.t("pausedTitle");
+    } else if (this.courseModes && this.lastFinishedCourse) {
+      const mode = this.courseModes[this.lastFinishedCourse];
+      this.courseMessage = mode === this.courseModes.freestyle
+        ? this.t("courseFinishedStyle", { mode: mode.label, value: Math.floor(this.styleScore) })
+        : this.t("courseFinishedTime", { mode: mode.label, value: this.formatTime(mode.resultMs) });
+      document.title = "SkiFree";
+    } else {
+      document.title = "SkiFree";
+    }
+    if (this.canvas) this.canvas.dataset.language = language;
   }
 
   async start() {
+    this.languageSwitcher.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-language]");
+      if (button) this.setLanguage(button.dataset.language, true);
+    });
     window.addEventListener("resize", this.resize);
     window.addEventListener("keydown", (event) => this.onKeyDown(event));
     window.addEventListener("keyup", (event) => this.input.keys.delete(event.code));
@@ -337,13 +560,14 @@ class SkiFreeGame {
     this.gameOver = false;
     this.courseMessage = "";
     this.lastFinishedCourse = "";
+    this.currentCourseResult = null;
     this.courseModes = this.createCourseModes();
     this.paused = false;
     this.started = true;
     this.input.pointerActive = false;
     this.input.touchPointerId = null;
     document.title = "SkiFree";
-    this.pauseCard.textContent = "Pausado";
+    this.pauseCard.textContent = this.t("paused");
     this.pauseCard.hidden = true;
     this.resultCard.hidden = true;
     this.styleEffects.replaceChildren();
@@ -522,7 +746,7 @@ class SkiFreeGame {
     this.playerShadow.renderOrder = Math.floor(this.player.y) - 1;
   }
 
-  showStylePoints(points, label = "Estilo") {
+  showStylePoints(points, label = this.t("style")) {
     if (points <= 0 || !this.styleEffects) return;
     const effect = document.createElement("div");
     effect.className = "style-popup";
@@ -533,7 +757,7 @@ class SkiFreeGame {
   }
 
   createCourseModes() {
-    return {
+    const modes = {
       race: {
         ...COURSE_LANES.race,
         active: false,
@@ -568,6 +792,8 @@ class SkiFreeGame {
         gates: this.buildGateSet(TREE_GATE_START_Y, TREE_GATE_STEP_Y, LONG_COURSE_FINISH_Y, 0x0190, 0x01b0)
       }
     };
+    for (const mode of Object.values(modes)) mode.label = this.t(mode.labelKey);
+    return modes;
   }
 
   buildGateSet(startY, stepY, finishY, redX, blueX) {
@@ -592,13 +818,13 @@ class SkiFreeGame {
     this.addCourseSign(0, 0, SPRITE.TREE_SLALOM_SIGN, "treeSlalom");
     this.layoutCourseLabels();
 
-    this.addCourseSignPair(COURSE_LANES.race.signX, RACE_START_Y, SPRITE.START_LEFT, SPRITE.START_RIGHT, 128);
-    this.addCourseSignPair(COURSE_LANES.freestyle.signX, RACE_START_Y, SPRITE.START_LEFT, SPRITE.START_RIGHT, 160);
-    this.addCourseSignPair(COURSE_LANES.treeSlalom.signX, RACE_START_Y, SPRITE.START_LEFT, SPRITE.START_RIGHT, 96);
+    this.addCourseSignPair(COURSE_LANES.race.signX, RACE_START_Y, SPRITE.START_RIGHT, SPRITE.START_LEFT, 128);
+    this.addCourseSignPair(COURSE_LANES.freestyle.signX, RACE_START_Y, SPRITE.START_RIGHT, SPRITE.START_LEFT, 160);
+    this.addCourseSignPair(COURSE_LANES.treeSlalom.signX, RACE_START_Y, SPRITE.START_RIGHT, SPRITE.START_LEFT, 96);
 
-    this.addCourseSignPair(COURSE_LANES.race.signX, RACE_FINISH_Y, SPRITE.FINISH_LEFT, SPRITE.FINISH_RIGHT, 128);
-    this.addCourseSignPair(COURSE_LANES.freestyle.signX, LONG_COURSE_FINISH_Y, SPRITE.FINISH_LEFT, SPRITE.FINISH_RIGHT, 160);
-    this.addCourseSignPair(COURSE_LANES.treeSlalom.signX, LONG_COURSE_FINISH_Y, SPRITE.FINISH_LEFT, SPRITE.FINISH_RIGHT, 96);
+    this.addCourseSignPair(COURSE_LANES.race.signX, RACE_FINISH_Y, SPRITE.FINISH_RIGHT, SPRITE.FINISH_LEFT, 128);
+    this.addCourseSignPair(COURSE_LANES.freestyle.signX, LONG_COURSE_FINISH_Y, SPRITE.FINISH_RIGHT, SPRITE.FINISH_LEFT, 160);
+    this.addCourseSignPair(COURSE_LANES.treeSlalom.signX, LONG_COURSE_FINISH_Y, SPRITE.FINISH_RIGHT, SPRITE.FINISH_LEFT, 96);
 
     for (const mode of [this.courseModes.race, this.courseModes.treeSlalom]) {
       for (const [index, gate] of mode.gates.entries()) {
@@ -886,7 +1112,7 @@ class SkiFreeGame {
         this.refreshSprite(gate.marker);
       }
     });
-    this.courseMessage = `Prova iniciada: ${mode.label}`;
+    this.courseMessage = this.t("courseStarted", { mode: mode.label });
   }
 
   finishCourseMode(mode) {
@@ -896,8 +1122,8 @@ class SkiFreeGame {
     this.lastFinishedCourse = Object.entries(this.courseModes)
       .find(([, value]) => value === mode)?.[0] || "";
     this.courseMessage = mode === this.courseModes.freestyle
-      ? `Prova concluída — ${mode.label}: ${Math.floor(this.styleScore)} pontos de estilo`
-      : `Prova concluída — ${mode.label}: ${this.formatTime(mode.resultMs)}`;
+      ? this.t("courseFinishedStyle", { mode: mode.label, value: Math.floor(this.styleScore) })
+      : this.t("courseFinishedTime", { mode: mode.label, value: this.formatTime(mode.resultMs) });
     this.showCourseResults(this.lastFinishedCourse, mode);
   }
 
@@ -919,12 +1145,25 @@ class SkiFreeGame {
       // Storage can be unavailable in privacy modes; the current result is still shown.
     }
 
+    this.currentCourseResult = { courseName, mode, ranked, higherWins, value };
+    this.renderCourseResults();
+    this.resultCard.hidden = false;
+    this.paused = true;
+    document.title = this.t("resultsTitle", { mode: mode.label });
+  }
+
+  renderCourseResults() {
+    const result = this.currentCourseResult;
+    if (!result) return;
+    const { mode, ranked, higherWins, value } = result;
     this.resultName.textContent = mode.label;
     this.resultList.replaceChildren();
     for (const [index, entry] of ranked.entries.entries()) {
       const item = document.createElement("li");
-      const score = higherWins ? `${Math.floor(entry.value)} pontos` : this.formatTime(entry.value);
-      item.textContent = `${score}${entry.current ? "  ← seu resultado!" : ""}`;
+      const score = higherWins
+        ? this.t("points", { value: Math.floor(entry.value) })
+        : this.formatTime(entry.value);
+      item.textContent = `${score}${entry.current ? `  ← ${this.t("yourResult")}` : ""}`;
       if (entry.current) item.className = "current-result";
       item.value = index + 1;
       this.resultList.append(item);
@@ -932,12 +1171,10 @@ class SkiFreeGame {
     if (ranked.rank < 0) {
       const item = document.createElement("li");
       item.className = "current-result unranked-result";
-      item.textContent = `${higherWins ? `${value} pontos` : this.formatTime(value)}  ← tente novamente!`;
+      const score = higherWins ? this.t("points", { value }) : this.formatTime(value);
+      item.textContent = `${score}  ← ${this.t("tryAgain")}`;
       this.resultList.append(item);
     }
-    this.resultCard.hidden = false;
-    this.paused = true;
-    document.title = `SkiFree - Resultados de ${mode.label}`;
   }
 
   closeCourseResults() {
@@ -960,7 +1197,7 @@ class SkiFreeGame {
         this.gatePassCount += 1;
         this.styleScore += GATE_STYLE_POINTS;
         this.lastGateStyleAward = GATE_STYLE_POINTS;
-        this.showStylePoints(GATE_STYLE_POINTS, "Bandeira");
+        this.showStylePoints(GATE_STYLE_POINTS, this.t("flag"));
       } else {
         gate.missed = true;
         mode.missedGates += 1;
@@ -985,7 +1222,7 @@ class SkiFreeGame {
     return previous.x + (current.x - previous.x) * t;
   }
 
-  addStyleScore(amount, label = "Estilo") {
+  addStyleScore(amount, label = this.t("style")) {
     if (this.activeCourseName() === "freestyle") {
       this.styleScore += amount;
       if (amount > 0) this.showStylePoints(amount, label);
@@ -1151,10 +1388,11 @@ class SkiFreeGame {
 
   addPlayerRivals() {
     const offsets = [-105, 70, -25];
+    const names = this.t("rivalNames");
     for (let i = 0; i < RIVAL_COUNT; i += 1) {
       const rival = this.addObject({
         kind: RIVAL_KIND,
-        name: RIVAL_NAMES[i],
+        name: names[i],
         state: PLAYER_STATE.STRAIGHT,
         spriteId: spriteForState(PLAYER_STATE.STRAIGHT),
         x: (i - 1) * 72,
@@ -1369,7 +1607,7 @@ class SkiFreeGame {
       monster
     };
     this.gameOver = false;
-    this.courseMessage = "O Yeti pegou você";
+    this.courseMessage = this.t("yetiCaught");
     this.player.speed = 0;
     this.player.vx = 0;
     this.player.actionTimer = 0;
@@ -1385,7 +1623,7 @@ class SkiFreeGame {
     monster.spriteId = YETI_ATTACK_FRAMES[0];
     this.refreshSprite(monster);
     this.pauseCard.hidden = true;
-    document.title = "SkiFree - O Yeti pegou você";
+    document.title = this.t("yetiTitle");
     this.syncPlayerDataset();
   }
 
@@ -1412,7 +1650,7 @@ class SkiFreeGame {
       attack.active = false;
       attack.finished = true;
       this.gameOver = true;
-      this.pauseCard.textContent = "O Yeti pegou você";
+      this.pauseCard.textContent = this.t("yetiCaught");
       this.pauseCard.hidden = false;
     }
 
@@ -1721,16 +1959,17 @@ class SkiFreeGame {
 
   localizedMaterial(spriteId) {
     if (this.localizedMaterials.has(spriteId)) return this.localizedMaterials.get(spriteId);
+    const signs = this.t("signs");
     const labels = {
-      [SPRITE.HELP_MOUSE]: ["MOUSE/TOQUE", "MOVA PARA", "VIRAR"],
-      [SPRITE.HELP_KEYS]: ["TECLAS", "SETAS OU", "NUMPAD"],
-      [SPRITE.START_LEFT]: ["← INÍCIO"],
-      [SPRITE.START_RIGHT]: ["INÍCIO →"],
-      [SPRITE.FINISH_LEFT]: ["← FIM"],
-      [SPRITE.FINISH_RIGHT]: ["FIM →"],
-      [SPRITE.SLALOM_SIGN]: ["CORRIDA"],
-      [SPRITE.TREE_SLALOM_SIGN]: ["SLALOM", "ÁRVORES"],
-      [SPRITE.FREESTYLE_SIGN]: ["ESTILO", "LIVRE"]
+      [SPRITE.HELP_MOUSE]: signs.helpMouse,
+      [SPRITE.HELP_KEYS]: signs.helpKeys,
+      [SPRITE.START_LEFT]: signs.startLeft,
+      [SPRITE.START_RIGHT]: signs.startRight,
+      [SPRITE.FINISH_LEFT]: signs.finishLeft,
+      [SPRITE.FINISH_RIGHT]: signs.finishRight,
+      [SPRITE.SLALOM_SIGN]: signs.race,
+      [SPRITE.TREE_SLALOM_SIGN]: signs.treeSlalom,
+      [SPRITE.FREESTYLE_SIGN]: signs.freestyle
     };
     const lines = labels[spriteId] || [""];
     const { width, height } = this.assets.size(spriteId);
@@ -2035,12 +2274,12 @@ class SkiFreeGame {
     const state = this.player.state;
     let nextState = state;
 
-    if (code === "ArrowLeft" || code === "Numpad4") {
+    if (code === "ArrowLeft" || code === "KeyA" || code === "Numpad4") {
       nextState = TURN_TRANSITION[state]?.[0] ?? state;
       if (nextState === PLAYER_STATE.HARD_LEFT) {
         this.player.turnVelocity = Math.max(-8, this.player.turnVelocity - 8);
       }
-    } else if (code === "ArrowRight" || code === "Numpad6") {
+    } else if (code === "ArrowRight" || code === "KeyD" || code === "Numpad6") {
       nextState = TURN_TRANSITION[state]?.[1] ?? state;
       if (nextState === PLAYER_STATE.HARD_RIGHT) {
         this.player.turnVelocity = Math.min(8, this.player.turnVelocity + 8);
@@ -2073,6 +2312,8 @@ class SkiFreeGame {
       return false;
     }
 
+    this.input.pointerActive = false;
+    this.input.touchPointerId = null;
     this.setPlayerState(nextState);
     if (this.player.mode > 0) this.player.manualTrickTimer = 0.2;
     if (this.player.mode > 0 && this.isStyleState(nextState) && nextState !== state) {
@@ -2142,16 +2383,23 @@ class SkiFreeGame {
       this.input.pointerActive = false;
       this.input.touchPointerId = null;
     }
-    this.pauseCard.textContent = "Pausado";
+    this.pauseCard.textContent = this.t("paused");
     this.pauseCard.hidden = !paused;
-    document.title = paused ? "Ski pausado — pressione F3 para continuar" : "SkiFree";
+    document.title = paused ? this.t("pausedTitle") : "SkiFree";
   }
 }
 
-const game = new SkiFreeGame();
-window.skiFreeGame = game;
-game.start().catch((error) => {
-  console.error(error);
-  const loadCard = document.querySelector("#load-card");
-  loadCard.textContent = "Falha ao carregar";
-});
+async function boot() {
+  const language = await detectInitialLanguage();
+  const game = new SkiFreeGame(language);
+  window.skiFreeGame = game;
+  try {
+    await game.start();
+  } catch (error) {
+    console.error(error);
+    const loadCard = document.querySelector("#load-card");
+    loadCard.textContent = translate(language, "loadFailed");
+  }
+}
+
+boot();

@@ -58,10 +58,21 @@ assert.equal(hasCollisionRecoveryProtection(player), false);
 
 const source = await readFile(path.join(root, "src", "main.js"), "utf8");
 const html = await readFile(path.join(root, "index.html"), "utf8");
+const worker = await readFile(path.join(root, "worker", "index.js"), "utf8");
 assert.ok(html.includes('<html lang="pt-BR">'));
 for (const localizedText of ["Tempo:", "Dist.:", "Veloc.:", "Estilo:", "Pausado", "Recordes", "Carregando"]) {
   assert.ok(html.includes(localizedText), `missing pt-BR interface text: ${localizedText}`);
 }
+for (const language of ["en-US", "pt-BR"]) {
+  assert.ok(html.includes(`data-language="${language}"`), `missing language button: ${language}`);
+}
+for (const englishText of ["High Scores", "Freestyle", "The Yeti got you", "Failed to load"]) {
+  assert.ok(source.includes(englishText), `missing English translation: ${englishText}`);
+}
+assert.ok(source.includes('const LANGUAGE_STORAGE_KEY = "skifree-language"'));
+assert.ok(source.includes('new URL("api/country", window.location.href)'));
+assert.ok(worker.includes('url.pathname === "/api/country"'));
+assert.ok(worker.includes("request.cf?.country"));
 for (const recoveredConstant of [
   "const RACE_START_Y = 0x0280",
   "const RACE_FINISH_Y = 0x21c0",
@@ -72,5 +83,23 @@ for (const recoveredConstant of [
 }
 assert.ok(source.includes('window.addEventListener("pointerup"'));
 assert.ok(source.includes('window.addEventListener("pointercancel"'));
+assert.ok(source.includes('code === "ArrowLeft" || code === "KeyA" || code === "Numpad4"'));
+assert.ok(source.includes('code === "ArrowRight" || code === "KeyD" || code === "Numpad6"'));
+for (const halfWidth of [128, 160, 96]) {
+  assert.ok(
+    source.includes(`RACE_START_Y, SPRITE.START_RIGHT, SPRITE.START_LEFT, ${halfWidth}`),
+    `start sign sprites must be visually swapped for lane width ${halfWidth}`
+  );
+}
+for (const halfWidth of [128, 160, 96]) {
+  assert.ok(
+    source.includes(`SPRITE.FINISH_RIGHT, SPRITE.FINISH_LEFT, ${halfWidth}`),
+    `finish sign sprites must be visually swapped for lane width ${halfWidth}`
+  );
+}
+assert.ok(
+  source.includes("this.input.pointerActive = false;\n    this.input.touchPointerId = null;\n    this.setPlayerState(nextState);"),
+  "handled keyboard input must reclaim control from the pointer"
+);
 
-console.log("Verified recovered tables, 86 assets, crash recovery, and mobile gesture rules without a browser.");
+console.log("Verified recovered rules, 86 assets, crash recovery, mobile gestures, and bilingual locale selection without a browser.");
