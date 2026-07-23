@@ -126,7 +126,7 @@ async function inspectPage(page, viewportName) {
     || state.effects.snowFieldHeight < state.viewport.height) {
     throw new Error(`${viewportName}: snow field does not cover the viewport`);
   }
-  if (!state.hudText.includes("Tempo:") || !state.hudText.includes("Estilo:")) {
+  if (!state.hudText.includes("Tempo:") || !state.hudText.includes("Aura:")) {
     throw new Error(`${viewportName}: HUD text missing expected status rows`);
   }
   if (state.hud.right > state.viewport.width || state.hud.bottom > state.viewport.height) {
@@ -171,6 +171,28 @@ async function verifyControls(page) {
   });
   if (braking.speed > 0.05 || Math.abs(braking.vx) > 0.1) {
     throw new Error(`hard turn did not brake both motion axes: ${JSON.stringify(braking)}`);
+  }
+
+  await page.evaluate(() => {
+    window.skiFreeGame.restart();
+    window.skiFreeGame.input.pointerActive = false;
+  });
+  await page.keyboard.press("KeyP");
+  const yetiDebug = await page.evaluate(() => {
+    const game = window.skiFreeGame;
+    return {
+      unlocked: game.yetiDebugUnlocked,
+      waveActive: game.yetiWaveActive,
+      waveSize: game.yetiWaveSize,
+      playerDistance: game.player.y,
+      yetiCount: game.objects.filter((object) => object.kind === 5).length
+    };
+  });
+  if (
+    !yetiDebug.unlocked || !yetiDebug.waveActive || yetiDebug.waveSize !== 1
+    || yetiDebug.yetiCount !== 1 || yetiDebug.playerDistance >= 32000
+  ) {
+    throw new Error(`hidden P key did not start the yeti event early: ${JSON.stringify(yetiDebug)}`);
   }
 
   const mouseAxes = await page.evaluate(() => {
@@ -220,7 +242,7 @@ async function verifyControls(page) {
   await page.keyboard.press("Space");
   await page.waitForFunction(() => {
     const game = document.querySelector("#game");
-    return game?.dataset.playerMode === "1" && Number(game.dataset.playerActionTimer) > 0;
+    return Number(game?.dataset.playerMode) > 0 && Number(game.dataset.playerActionTimer) > 0;
   }, null, { timeout: 3000 });
   await page.waitForFunction(() => {
     const game = document.querySelector("#game");
@@ -230,7 +252,7 @@ async function verifyControls(page) {
   await page.mouse.click(640, 360);
   await page.waitForFunction(() => {
     const game = document.querySelector("#game");
-    return game?.dataset.playerMode === "1" && Number(game.dataset.playerActionTimer) > 0;
+    return Number(game?.dataset.playerMode) > 0 && Number(game.dataset.playerActionTimer) > 0;
   }, null, { timeout: 3000 });
   await page.waitForFunction(() => {
     const game = document.querySelector("#game");
@@ -302,7 +324,7 @@ async function verifyModernEffects(page) {
   if (result.snowCount < 300 || result.snowFieldWidth < 800 || result.snowFieldHeight < 600) {
     throw new Error(`snow system is undersized: ${JSON.stringify(result)}`);
   }
-  if (result.styleAfter !== result.styleBefore + 9 || !result.popupText.includes("+9") || result.popupCount < 1) {
+  if (result.styleAfter !== result.styleBefore + 9 || result.popupText !== "+ aura" || result.popupCount < 1) {
     throw new Error(`style feedback did not appear: ${JSON.stringify(result)}`);
   }
   if (!(result.shadowOpacity > 0 && result.shadowOpacity < 0.2)) {
@@ -1038,7 +1060,7 @@ async function verifyYetiAttack(page) {
   if (result.firstFrame !== 76) throw new Error(`yeti attack started on sprite ${result.firstFrame}, expected 76`);
   if (!result.finished || !result.gameOver) throw new Error("yeti attack did not finish into game over");
   if (result.finalFrame !== 81) throw new Error(`yeti attack ended on sprite ${result.finalFrame}, expected 81`);
-  if (!result.messageVisible || !result.message.includes("yeti")) {
+  if (!result.messageVisible || !result.message.toLowerCase().includes("yeti")) {
     throw new Error("yeti caught message was not visible after attack");
   }
   if (result.dataset.finished !== "1" || result.dataset.gameOver !== "1" || result.dataset.playerState !== "17") {
@@ -1065,53 +1087,118 @@ async function verifyYetiChase(page) {
     game.updateCourseObjects(dt);
     const spawnedBeforeThreshold = Boolean(game.monster);
 
-    let spawned = false;
-    let spawnedAtSeconds = 0;
-    let closestDistance = Number.POSITIVE_INFINITY;
-    const runSprites = new Set();
-    for (let tick = 0; tick < 20 * 60; tick += 1) {
+    game.player.y = chaseDistance + 1;
+    game.updateCourseObjects(dt);
+    const firstWave = game.objects.filter((object) => object.kind === 5);
+    const firstSpawnSpeed = firstWave[0]?.speed;
+    const firstSpawnPhase = firstWave[0]?.chasePhase;
+    const runSprites = new Set(firstWave.map((monster) => monster.spriteId));
+
+    game.player.speed = 6;
+    game.updateCourseObjects(dt);
+    const catchupTrackingSpeed = firstWave[0]?.speed;
+    game.player.speed = 3.85;
+    for (let tick = 0; tick < 360 && firstWave[0]?.chasePhase !== "locked"; tick += 1) {
       game.player.y += game.player.speed * dt * 60;
       game.updateCourseObjects(dt);
-      if (game.monster && !game.yetiAttack.active && !game.yetiAttack.finished) {
-        runSprites.add(game.monster.spriteId);
-      }
-      game.checkCollisions();
-
-      if (game.monster) {
-        if (!spawned) {
-          spawned = true;
-          spawnedAtSeconds = tick * dt;
-        }
-        closestDistance = Math.min(
-          closestDistance,
-          Math.hypot(game.monster.x - game.player.x, game.monster.y - game.player.y)
-        );
-      }
-      if (game.yetiAttack.active || game.yetiAttack.finished) break;
+      if (firstWave[0]) runSprites.add(firstWave[0].spriteId);
     }
+    const lockedSpeed = firstWave[0]?.speed;
+    const lockedPhase = firstWave[0]?.chasePhase;
+
+    game.player.speed = 10;
+    for (let tick = 0; tick < 180 && game.yetiWaveSize === 1; tick += 1) {
+      game.player.y += game.player.speed * dt * 60;
+      game.updateCourseObjects(dt);
+    }
+    const secondWave = game.objects.filter((object) =>
+      object.kind === 5 && object.waveId === game.yetiWaveId
+    );
+    const secondWaveSize = game.yetiWaveSize;
+    const secondWaveSpeeds = secondWave.map((monster) => monster.speed);
+    const secondWavePhases = secondWave.map((monster) => monster.chasePhase);
+    const secondWaveXs = secondWave.map((monster) => monster.x);
+    const secondWaveTrackers = secondWave.map((monster) => monster.tracksPlayerX);
+    game.player.x = 200;
+    game.updateCourseObjects(dt);
+    const secondWaveXsAfterSteering = secondWave.map((monster) => monster.x);
+
+    for (const monster of secondWave) {
+      monster.chasePhase = "locked";
+      monster.y = game.player.y - game.viewport.height;
+    }
+    game.updateCourseObjects(0);
+    const thirdWave = game.objects.filter((object) =>
+      object.kind === 5 && object.waveId === game.yetiWaveId
+    );
+    const thirdWaveSize = game.yetiWaveSize;
+    const thirdWaveCount = thirdWave.length;
+
+    game.restart();
+    game.player.speed = 1;
+    const slowPlayerWave = game.spawnYetiWave(1);
 
     return {
       chaseDistance,
       spawnedBeforeThreshold,
-      spawned,
-      spawnedAtSeconds,
-      closestDistance,
+      firstWaveSize: firstWave.length,
+      firstSpawnSpeed,
+      firstSpawnPhase,
+      catchupTrackingSpeed,
+      lockedSpeed,
+      lockedPhase,
       runSprites: Array.from(runSprites),
-      attackStarted: game.yetiAttack.active || game.yetiAttack.finished,
-      playerY: game.player.y,
-      monsterY: game.monster?.y || null
+      secondWaveSize,
+      secondWaveCount: secondWave.length,
+      secondWaveSpeeds,
+      secondWavePhases,
+      secondWaveXs,
+      secondWaveXsAfterSteering,
+      secondWaveTrackers,
+      viewportWidth: game.viewport.width,
+      thirdWaveSize,
+      thirdWaveCount,
+      minimumYetiSpeed: slowPlayerWave[0].speed
     };
   });
 
   if (result.spawnedBeforeThreshold) {
     throw new Error(`yeti spawned before chase distance ${result.chaseDistance}`);
   }
-  if (!result.spawned) throw new Error("yeti did not spawn after crossing the chase distance");
+  if (
+    result.firstWaveSize !== 1 || result.firstSpawnPhase !== "catchup"
+    || Math.abs(result.firstSpawnSpeed - 4.8125) > 0.0001 || result.catchupTrackingSpeed !== 7.5
+  ) {
+    throw new Error(`first yeti wave did not spawn at 1.25x player speed: ${JSON.stringify(result)}`);
+  }
+  if (result.lockedPhase !== "locked" || result.lockedSpeed !== 4) {
+    throw new Error(`yeti did not lock to the player's midpoint speed: ${JSON.stringify(result)}`);
+  }
   if (result.runSprites.some((spriteId) => spriteId < 68 || spriteId > 75)) {
     throw new Error(`yeti run animation used non-run sprites: ${JSON.stringify(result.runSprites)}`);
   }
-  if (!result.attackStarted) {
-    throw new Error(`yeti spawned but did not catch the skier: ${JSON.stringify(result)}`);
+  if (
+    result.secondWaveSize !== 2 || result.secondWaveCount !== 2
+    || result.secondWaveSpeeds.some((speed) => speed !== 12.5)
+    || result.secondWavePhases.some((phase) => phase !== "catchup")
+    || Math.abs(result.secondWaveXs[1] - result.secondWaveXs[0]) < result.viewportWidth * 0.7
+    || result.secondWaveTrackers.filter(Boolean).length !== 1
+  ) {
+    throw new Error(`escaping the first yeti did not spawn a two-yeti wave: ${JSON.stringify(result)}`);
+  }
+  const trackingIndex = result.secondWaveTrackers.indexOf(true);
+  const fixedIndex = result.secondWaveTrackers.indexOf(false);
+  if (
+    result.secondWaveXsAfterSteering[trackingIndex] === result.secondWaveXs[trackingIndex]
+    || result.secondWaveXsAfterSteering[fixedIndex] !== result.secondWaveXs[fixedIndex]
+  ) {
+    throw new Error(`only one yeti should track the player horizontally: ${JSON.stringify(result)}`);
+  }
+  if (result.thirdWaveSize !== 3 || result.thirdWaveCount !== 3) {
+    throw new Error(`yeti waves did not continue growing: ${JSON.stringify(result)}`);
+  }
+  if (result.minimumYetiSpeed !== 4) {
+    throw new Error(`yeti speed dropped below the skier's base speed: ${JSON.stringify(result)}`);
   }
 }
 

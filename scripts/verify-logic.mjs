@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   advanceCrashRecovery,
   classifyTouchGesture,
+  downhillAccelerationFactor,
   hasCollisionRecoveryProtection,
   rankCourseResults
 } from "../src/gameRules.js";
@@ -60,9 +61,13 @@ const source = await readFile(path.join(root, "src", "main.js"), "utf8");
 const html = await readFile(path.join(root, "index.html"), "utf8");
 const worker = await readFile(path.join(root, "worker", "index.js"), "utf8");
 assert.ok(html.includes('<html lang="pt-BR">'));
-for (const localizedText of ["Tempo:", "Dist.:", "Veloc.:", "Estilo:", "Pausado", "Recordes", "Carregando"]) {
+for (const localizedText of ["Tempo:", "Dist.:", "Veloc.:", "Aura:", "Pausado", "Recordes", "Carregando"]) {
   assert.ok(html.includes(localizedText), `missing pt-BR interface text: ${localizedText}`);
 }
+assert.equal(downhillAccelerationFactor(PLAYER_STATE.STRAIGHT), 1);
+assert.equal(downhillAccelerationFactor(PLAYER_STATE.LEFT_1), 0.62);
+assert.equal(downhillAccelerationFactor(PLAYER_STATE.RIGHT_2), 0.28);
+assert.equal(downhillAccelerationFactor(PLAYER_STATE.HARD_LEFT), 0);
 for (const language of ["en-US", "pt-BR"]) {
   assert.ok(html.includes(`data-language="${language}"`), `missing language button: ${language}`);
 }
@@ -98,7 +103,7 @@ for (const halfWidth of [128, 160, 96]) {
   );
 }
 assert.ok(
-  source.includes("this.input.pointerActive = false;\n    this.input.touchPointerId = null;\n    this.setPlayerState(nextState);"),
+  /this\.input\.pointerActive = false;\r?\n\s+this\.input\.touchPointerId = null;\r?\n\s+this\.setPlayerState\(nextState\);/.test(source),
   "handled keyboard input must reclaim control from the pointer"
 );
 

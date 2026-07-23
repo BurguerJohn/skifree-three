@@ -11,6 +11,7 @@ import {
 import {
   advanceCrashRecovery,
   classifyTouchGesture,
+  downhillAccelerationFactor,
   hasCollisionRecoveryProtection,
   rankCourseResults
 } from "./gameRules.js";
@@ -24,12 +25,13 @@ const CAMERA_DEPTH_RANGE = 0;
 const CAMERA_PLAYER_DEPTH = 0;
 const YETI_CHASE_DISTANCE_METERS = 2000;
 const CHASE_DISTANCE = YETI_CHASE_DISTANCE_METERS * PIXELS_PER_METER;
+const CAMERA_PLAYER_OFFSET_RATIO = 0.16;
 const YETI_SPAWN_BACK_VIEWPORT_RATIO = 0.45;
-const YETI_SPAWN_SIDE_RANGE = 120;
-const YETI_MIN_SPEED = 4.8;
-const YETI_MAX_SPEED = 6.25;
-const YETI_SPEED_ADVANTAGE = 0.95;
-const YETI_DISTANCE_BOOST_RANGE = 360;
+const YETI_SCREEN_TOP_BACK_RATIO = 0.5 - CAMERA_PLAYER_OFFSET_RATIO;
+const YETI_LOCK_BACK_VIEWPORT_RATIO = YETI_SCREEN_TOP_BACK_RATIO / 2;
+const YETI_SPAWN_SPEED_MULTIPLIER = 1.25;
+const YETI_SPAWN_SIDE_MARGIN = 48;
+const YETI_MIN_SPEED = PLAYER_MOTION[PLAYER_STATE.STRAIGHT].targetSpeed;
 const YETI_RUN_FRAME_SECONDS = 0.13;
 const YETI_RUN_FRAMES = Object.freeze({
   down: [68, 69],
@@ -70,6 +72,9 @@ const LIFT_MIN_Y = -0x0400;
 const LIFT_MAX_Y = 0x5c00;
 const LIFT_STEP_Y = 0x0800;
 const GATE_STYLE_POINTS = 12;
+const DOWNHILL_ACCELERATION_PER_SECOND = 0.34;
+const MAX_ACCUMULATED_SPEED = 8;
+const JUMP_SPEED_BOOST = 1.15;
 const SNOW_PARTICLE_COUNT = 360;
 const SKI_TRACK_MAX_SEGMENTS = 900;
 const SKI_TRACK_SAMPLE_DISTANCE = 5;
@@ -88,22 +93,22 @@ const TRANSLATIONS = Object.freeze({
     timeLabel: "Tempo:",
     distanceLabel: "Dist.:",
     speedLabel: "Veloc.:",
-    styleLabel: "Estilo:",
+    styleLabel: "Aura:",
     paused: "Pausado",
     records: "Recordes",
     resultHint: "Toque na tela ou pressione Enter para continuar",
     loading: "Carregando",
     loadFailed: "Falha ao carregar",
-    style: "Estilo",
+    style: "aura",
     flag: "Bandeira",
-    points: "{value} pontos",
+    points: "{value} aura",
     yourResult: "seu resultado!",
     tryAgain: "tente novamente!",
     courseRace: "Corrida",
-    courseFreestyle: "Estilo livre",
+    courseFreestyle: "Aura livre",
     courseTreeSlalom: "Slalom entre árvores",
     courseStarted: "Prova iniciada: {mode}",
-    courseFinishedStyle: "Prova concluída — {mode}: {value} pontos de estilo",
+    courseFinishedStyle: "Prova concluída — {mode}: {value} aura",
     courseFinishedTime: "Prova concluída — {mode}: {value}",
     resultsTitle: "SkiFree - Resultados de {mode}",
     yetiCaught: "O Yeti pegou você",
@@ -119,7 +124,7 @@ const TRANSLATIONS = Object.freeze({
       finishRight: ["FIM →"],
       race: ["CORRIDA"],
       treeSlalom: ["SLALOM", "ÁRVORES"],
-      freestyle: ["ESTILO", "LIVRE"]
+      freestyle: ["AURA", "LIVRE"]
     }
   },
   "en-US": {
@@ -199,6 +204,9 @@ function browserSuggestsBrazil() {
 async function detectInitialLanguage() {
   const selected = storedLanguage();
   if (selected) return selected;
+  if (["localhost", "127.0.0.1", "::1"].includes(window.location.hostname)) {
+    return browserSuggestsBrazil() ? "pt-BR" : "en-US";
+  }
 
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 1200);
@@ -551,6 +559,10 @@ class SkiFreeGame {
     this.lastGateStyleAward = 0;
     this.sideSpawnAnchorX = 0;
     this.monster = null;
+    this.yetiWaveSize = 1;
+    this.yetiWaveId = 0;
+    this.yetiWaveActive = false;
+    this.yetiDebugUnlocked = false;
     this.yetiAttack = {
       active: false,
       finished: false,
@@ -581,6 +593,8 @@ class SkiFreeGame {
       y: 0,
       vx: 0,
       speed: 3.4,
+      accumulatedSpeed: 0,
+      downhillFactor: 1,
       turnVelocity: 0,
       actionTimer: 0,
       pendingAction: 0,
@@ -750,10 +764,37 @@ class SkiFreeGame {
     if (points <= 0 || !this.styleEffects) return;
     const effect = document.createElement("div");
     effect.className = "style-popup";
-    effect.textContent = `+${Math.floor(points)} ${label}`;
+    effect.textContent = this.language === "pt-BR" ? "+ aura" : `+${Math.floor(points)} ${label}`;
     effect.style.setProperty("--drift", `${Math.round((Math.random() - 0.5) * 54)}px`);
     this.styleEffects.append(effect);
     effect.addEventListener("animationend", () => effect.remove(), { once: true });
+  }
+
+  showJumpBoost() {
+    if (!this.styleEffects) return;
+    const effect = document.createElement("div");
+    effect.className = "jump-boost";
+    effect.setAttribute("aria-hidden", "true");
+    for (let index = 0; index < 6; index += 1) {
+      const streak = document.createElement("i");
+      streak.style.setProperty("--angle", `${index * 60}deg`);
+      effect.append(streak);
+    }
+    this.styleEffects.append(effect);
+    effect.addEventListener("animationend", () => effect.remove(), { once: true });
+  }
+
+  addJumpSpeedBoost() {
+    this.player.accumulatedSpeed = Math.min(
+      MAX_ACCUMULATED_SPEED,
+      (this.player.accumulatedSpeed || 0) + JUMP_SPEED_BOOST
+    );
+    this.player.speed += JUMP_SPEED_BOOST;
+    this.showJumpBoost();
+  }
+
+  resetAccumulatedSpeed() {
+    this.player.accumulatedSpeed = 0;
   }
 
   createCourseModes() {
@@ -1046,6 +1087,20 @@ class SkiFreeGame {
     if (recoveryState !== player.state) this.setPlayerState(recoveryState);
 
     const motion = PLAYER_MOTION[player.state] || PLAYER_MOTION[0];
+    if (player.mode === 0) {
+      const downhillFactor = downhillAccelerationFactor(player.state);
+      if (downhillFactor !== null) {
+        player.downhillFactor = downhillFactor;
+        if (downhillFactor === 0) {
+          player.accumulatedSpeed = 0;
+        } else {
+          player.accumulatedSpeed = Math.min(
+            MAX_ACCUMULATED_SPEED,
+            (player.accumulatedSpeed || 0) + DOWNHILL_ACCELERATION_PER_SECOND * downhillFactor * dt
+          );
+        }
+      }
+    }
     const profileVx = motion.vxRatio == null
       ? (motion.targetVx || 0)
       : Math.max(-4.2, Math.min(4.2, player.speed * motion.vxRatio));
@@ -1053,7 +1108,8 @@ class SkiFreeGame {
     const turnBlend = Math.min(1, dt * motion.turn);
     const speedBlend = Math.min(1, dt * motion.accel);
     player.vx += (vxTarget - player.vx) * turnBlend;
-    player.speed += (motion.targetSpeed - player.speed) * speedBlend;
+    const targetSpeed = motion.targetSpeed + (player.accumulatedSpeed || 0);
+    player.speed += (targetSpeed - player.speed) * speedBlend;
     player.turnVelocity *= Math.max(0, 1 - dt * 4.5);
 
     player.x += player.vx * dt * 60;
@@ -1291,20 +1347,71 @@ class SkiFreeGame {
       }
     }
 
+    this.handleYetiEscapes();
+
     if (this.rng.int(0, 665) === 0) {
       this.spawnTopAcrobat();
     }
 
-    if (!this.monster && this.player.y > CHASE_DISTANCE) {
-      this.monster = this.addObject({
+    if (!this.yetiWaveActive && (this.player.y > CHASE_DISTANCE || this.yetiDebugUnlocked)) {
+      this.spawnYetiWave(this.yetiWaveSize);
+    }
+  }
+
+  spawnYetiWave(size) {
+    this.yetiWaveSize = Math.max(1, Math.floor(size));
+    this.yetiWaveId += 1;
+    this.yetiWaveActive = true;
+    const spawnSpeed = Math.max(YETI_MIN_SPEED, this.player.speed * YETI_SPAWN_SPEED_MULTIPLIER);
+    const spreadWidth = Math.max(0, this.viewport.width - YETI_SPAWN_SIDE_MARGIN * 2);
+    const horizontalTrackerIndex = Math.floor((this.yetiWaveSize - 1) / 2);
+    const wave = [];
+
+    for (let index = 0; index < this.yetiWaveSize; index += 1) {
+      const laneOffset = this.yetiWaveSize === 1
+        ? 0
+        : -spreadWidth / 2 + (spreadWidth * index) / (this.yetiWaveSize - 1);
+      wave.push(this.addObject({
         kind: OBJECT_KIND.MONSTER,
-        spriteId: 68,
-        x: this.player.x + this.rng.range(-YETI_SPAWN_SIDE_RANGE, YETI_SPAWN_SIDE_RANGE),
+        spriteId: YETI_RUN_FRAMES.down[0],
+        x: this.player.x + laneOffset,
         y: this.player.y - this.viewport.height * YETI_SPAWN_BACK_VIEWPORT_RATIO,
+        speed: spawnSpeed,
+        chasePhase: "catchup",
+        tracksPlayerX: index === horizontalTrackerIndex,
+        waveId: this.yetiWaveId,
         runFramePhase: 0,
         collidable: true,
         radius: 20
-      });
+      }));
+    }
+
+    this.monster = wave[0] || null;
+    return wave;
+  }
+
+  handleYetiEscapes() {
+    if (!this.yetiWaveActive || this.yetiAttack.active || this.yetiAttack.finished) return;
+    const screenTopY = this.player.y - this.viewport.height * YETI_SCREEN_TOP_BACK_RATIO;
+    const escaped = this.objects.filter((object) =>
+      object.kind === OBJECT_KIND.MONSTER
+      && object.waveId === this.yetiWaveId
+      && object.chasePhase === "locked"
+      && object.y < screenTopY
+    );
+    if (escaped.length === 0) return;
+
+    const escapedSet = new Set(escaped);
+    for (const monster of escaped) this.removeSprite(monster);
+    this.objects = this.objects.filter((object) => !escapedSet.has(object));
+
+    const remaining = this.objects.filter((object) =>
+      object.kind === OBJECT_KIND.MONSTER && object.waveId === this.yetiWaveId
+    );
+    this.monster = remaining[0] || null;
+    if (remaining.length === 0) {
+      this.yetiWaveActive = false;
+      this.spawnYetiWave(this.yetiWaveSize + 1);
     }
   }
 
@@ -1568,14 +1675,22 @@ class SkiFreeGame {
 
     const dx = this.player.x - monster.x;
     const dy = this.player.y - monster.y;
-    const distance = Math.hypot(dx, dy) || 1;
-    const distanceBoost = Math.min(1.0, Math.max(0, (distance - 180) / YETI_DISTANCE_BOOST_RANGE));
-    const speed = Math.min(
-      YETI_MAX_SPEED,
-      Math.max(YETI_MIN_SPEED, this.player.speed + YETI_SPEED_ADVANTAGE) + distanceBoost
-    );
-    monster.x += (dx / distance) * speed * dt * 60;
-    monster.y += (dy / distance) * speed * dt * 60;
+    monster.speed ??= Math.max(YETI_MIN_SPEED, this.player.speed * YETI_SPAWN_SPEED_MULTIPLIER);
+    monster.chasePhase ??= "catchup";
+    if (monster.chasePhase === "catchup") {
+      monster.speed = Math.max(YETI_MIN_SPEED, this.player.speed * YETI_SPAWN_SPEED_MULTIPLIER);
+    }
+    const speed = monster.speed;
+    const movement = speed * dt * 60;
+    if (monster.tracksPlayerX !== false) {
+      monster.x += Math.max(-movement, Math.min(movement, dx));
+    }
+    monster.y += Math.min(Math.max(0, dy), movement);
+    const lockY = this.player.y - this.viewport.height * YETI_LOCK_BACK_VIEWPORT_RATIO;
+    if (monster.chasePhase === "catchup" && monster.y >= lockY) {
+      monster.chasePhase = "locked";
+      monster.speed = Math.max(YETI_MIN_SPEED, this.player.speed);
+    }
     monster.stateTimer = (monster.stateTimer || 0) + dt;
     while (monster.stateTimer >= YETI_RUN_FRAME_SECONDS) {
       monster.stateTimer -= YETI_RUN_FRAME_SECONDS;
@@ -1676,9 +1791,11 @@ class SkiFreeGame {
         this.launchTrick(object.kind);
         object.hit = true;
       } else if (object.kind === OBJECT_KIND.PATCH) {
+        this.resetAccumulatedSpeed();
         player.speed *= 0.5;
         object.hit = true;
       } else if (object.kind === OBJECT_KIND.DOG) {
+        this.resetAccumulatedSpeed();
         player.speed *= 0.5;
         this.setObjectState(object, DOG_STATES.ALERT);
         object.hit = true;
@@ -1696,6 +1813,7 @@ class SkiFreeGame {
           object.spriteId = SPRITE.BROKEN_STUMP;
           object.collidable = false;
           this.refreshSprite(object);
+          this.resetAccumulatedSpeed();
           player.speed *= 0.5;
           continue;
         }
@@ -1724,6 +1842,7 @@ class SkiFreeGame {
 
   crashInto(object) {
     const wasAirborne = this.player.mode > 0 || this.player.airHeight > 0;
+    this.resetAccumulatedSpeed();
     this.player.speed *= 0.25;
     this.player.vx *= -0.25;
     this.player.actionTimer = 0;
@@ -2071,6 +2190,11 @@ class SkiFreeGame {
     this.canvas.dataset.lastGateStyleAward = String(this.lastGateStyleAward || 0);
     this.canvas.dataset.yetiChaseDistanceMeters = String(YETI_CHASE_DISTANCE_METERS);
     this.canvas.dataset.yetiChaseDistancePx = String(CHASE_DISTANCE);
+    this.canvas.dataset.yetiWaveSize = String(this.yetiWaveSize || 1);
+    this.canvas.dataset.yetiWaveId = String(this.yetiWaveId || 0);
+    this.canvas.dataset.yetiCount = String(
+      this.objects?.filter((object) => object.kind === OBJECT_KIND.MONSTER).length || 0
+    );
     this.canvas.dataset.courseMode = this.activeCourseName() || this.lastFinishedCourse || "";
     this.canvas.dataset.courseActive = activeMode ? "1" : "0";
     this.canvas.dataset.courseFinished = displayMode?.finished ? "1" : "0";
@@ -2100,7 +2224,7 @@ class SkiFreeGame {
 
   updateCamera() {
     this.camera.position.x = this.player.x;
-    this.camera.position.y = -this.player.y - this.viewport.height * 0.16;
+    this.camera.position.y = -this.player.y - this.viewport.height * CAMERA_PLAYER_OFFSET_RATIO;
     this.camera.updateMatrixWorld();
   }
 
@@ -2222,6 +2346,7 @@ class SkiFreeGame {
       this.player.actionElapsed = 0;
       this.player.actionTimer = CLICK_TRICK_SECONDS;
       this.player.manualTrickTimer = 0.2;
+      this.addJumpSpeedBoost();
       this.setPlayerState(PLAYER_STATE.TRICK);
       this.addStyleScore(4);
     } else {
@@ -2261,6 +2386,14 @@ class SkiFreeGame {
     if (event.key === "f") {
       event.preventDefault();
       this.debugFast = !this.debugFast;
+      return;
+    }
+    if (event.key.toLowerCase() === "p") {
+      event.preventDefault();
+      this.yetiDebugUnlocked = true;
+      if (!this.yetiWaveActive && !this.yetiAttack.active && !this.yetiAttack.finished && !this.gameOver) {
+        this.spawnYetiWave(this.yetiWaveSize);
+      }
       return;
     }
     if (this.paused || this.player.state === PLAYER_STATE.CRASHED || this.player.state === PLAYER_STATE.FALLEN) return;
@@ -2303,6 +2436,7 @@ class SkiFreeGame {
         this.player.actionDuration = KEY_TRICK_SECONDS;
         this.player.actionElapsed = 0;
         this.player.actionTimer = KEY_TRICK_SECONDS;
+        this.addJumpSpeedBoost();
         nextState = PLAYER_STATE.TRICK;
         this.addStyleScore(4);
       } else {

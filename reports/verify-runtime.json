@@ -1,5 +1,5 @@
 {
-  "url": "http://127.0.0.1:5176/",
+  "url": "http://127.0.0.1:5174/",
   "results": [
     {
       "viewport": {
@@ -11,7 +11,7 @@
         "title": "SkiFree",
         "ready": true,
         "paused": false,
-        "hudText": "SkiFree\nTime:\n0:00:00.98\nDist:\n13m\nSpeed:\n14m/s\nStyle:\n0",
+        "hudText": "SkiFree\nTempo:\n0:00:01.04\nDist.:\n15m\nVeloc.:\n15m/s\nAura:\n0",
         "canvas": {
           "cssWidth": 1280,
           "cssHeight": 720,
@@ -20,7 +20,7 @@
           "simulationFps": "60"
         },
         "hud": {
-          "left": 1120,
+          "left": 1102,
           "right": 1270,
           "top": 10,
           "bottom": 119.25
@@ -48,9 +48,9 @@
         ]
       },
       "pixels": {
-        "nonSnow": 10327,
+        "nonSnow": 12515,
         "total": 921600,
-        "ratio": 0.011205512152777777
+        "ratio": 0.013579644097222222
       }
     },
     {
@@ -63,7 +63,7 @@
         "title": "SkiFree",
         "ready": true,
         "paused": false,
-        "hudText": "SkiFree\nTime:\n0:00:00.93\nDist:\n13m\nSpeed:\n14m/s\nStyle:\n0",
+        "hudText": "SkiFree\nTempo:\n0:00:01.03\nDist.:\n15m\nVeloc.:\n15m/s\nAura:\n0",
         "canvas": {
           "cssWidth": 390,
           "cssHeight": 844,
@@ -72,7 +72,7 @@
           "simulationFps": "60"
         },
         "hud": {
-          "left": 252,
+          "left": 232,
           "right": 384,
           "top": 6,
           "bottom": 112
@@ -100,9 +100,9 @@
         ]
       },
       "pixels": {
-        "nonSnow": 18742,
+        "nonSnow": 16742,
         "total": 329160,
-        "ratio": 0.05693887471138656
+        "ratio": 0.050862802284603235
       }
     }
   ]

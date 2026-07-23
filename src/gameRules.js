@@ -3,6 +3,28 @@ import { PLAYER_STATE } from "./skiData.js";
 export const TOUCH_TAP_MAX_MS = 260;
 export const TOUCH_TAP_MAX_DISTANCE = 20;
 
+export function downhillAccelerationFactor(state) {
+  switch (state) {
+    case PLAYER_STATE.STRAIGHT:
+      return 1;
+    case PLAYER_STATE.LEFT_1:
+    case PLAYER_STATE.RIGHT_1:
+      return 0.62;
+    case PLAYER_STATE.LEFT_2:
+    case PLAYER_STATE.RIGHT_2:
+      return 0.28;
+    case PLAYER_STATE.LEFT_3:
+    case PLAYER_STATE.RIGHT_3:
+    case PLAYER_STATE.HARD_LEFT:
+    case PLAYER_STATE.HARD_RIGHT:
+    case PLAYER_STATE.JUMP_LEFT:
+    case PLAYER_STATE.JUMP_RIGHT:
+      return 0;
+    default:
+      return null;
+  }
+}
+
 export function classifyTouchGesture(durationMs, distance, cancelled = false) {
   if (cancelled) return "cancelled";
   return durationMs <= TOUCH_TAP_MAX_MS && distance <= TOUCH_TAP_MAX_DISTANCE

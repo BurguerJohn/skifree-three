@@ -93,7 +93,7 @@ body {
 .style-popup {
   position: absolute;
   left: 50%;
-  top: 31%;
+  top: calc(34% - 34px);
   color: #1758ad;
   font-size: clamp(16px, 2.2vw, 24px);
   font-weight: 900;
@@ -104,6 +104,37 @@ body {
   will-change: transform, opacity;
 }
 
+.jump-boost {
+  position: absolute;
+  left: 50%;
+  top: 34%;
+  width: 42px;
+  height: 42px;
+  transform: translate(-50%, -50%);
+  border: 3px solid rgba(31, 146, 255, 0.85);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 14px rgba(31, 146, 255, 0.75);
+  animation: jump-boost-burst 0.48s ease-out forwards;
+}
+
+.jump-boost i {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 18px;
+  border-radius: 2px;
+  background: linear-gradient(#ffffff, #1f92ff);
+  transform-origin: 50% 0;
+  transform: rotate(var(--angle)) translateY(-31px);
+}
+
+@keyframes jump-boost-burst {
+  0% { opacity: 0; transform: translate(-50%, -35%) scale(0.35); }
+  25% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -70%) scale(1.75); }
+}
+
 @keyframes style-score-pop {
   0% { opacity: 0; transform: translate(-50%, 8px) scale(0.65) rotate(-3deg); }
   18% { opacity: 1; transform: translate(-50%, -5px) scale(1.16) rotate(1deg); }
@@ -111,7 +142,8 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .style-popup { animation-duration: 0.35s; }
+  .style-popup,
+  .jump-boost { animation-duration: 0.35s; }
 }
 
 #hud {
