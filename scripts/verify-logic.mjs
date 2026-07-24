@@ -7,6 +7,7 @@ import {
   classifyTouchGesture,
   downhillAccelerationFactor,
   hasCollisionRecoveryProtection,
+  isNearMissPass,
   rankCourseResults
 } from "../src/gameRules.js";
 import { ASSET_IDS, PLAYER_STATE, SPRITE, STATE_TO_SPRITE, TURN_TRANSITION } from "../src/skiData.js";
@@ -28,6 +29,9 @@ assert.equal(classifyTouchGesture(120, 4), "tap");
 assert.equal(classifyTouchGesture(400, 4), "steer");
 assert.equal(classifyTouchGesture(120, 40), "steer");
 assert.equal(classifyTouchGesture(80, 0, true), "cancelled");
+assert.equal(isNearMissPass(0, 20, 10, 20, 5), true);
+assert.equal(isNearMissPass(0, 14, 10, 20, 5), false, "overlaps are collisions, not near misses");
+assert.equal(isNearMissPass(0, 21, 10, 20, 5), false, "passes outside the danger margin do not score");
 
 const timeRanking = rankCourseResults([{ value: 9000 }, { value: 12000 }], 10000, false);
 assert.deepEqual(timeRanking.entries.map((entry) => entry.value), [9000, 10000, 12000]);
@@ -71,6 +75,10 @@ assert.equal(downhillAccelerationFactor(PLAYER_STATE.HARD_LEFT), 0);
 for (const language of ["en-US", "pt-BR"]) {
   assert.ok(html.includes(`data-language="${language}"`), `missing language button: ${language}`);
 }
+assert.ok(html.includes('href="https://github.com/BurguerJohn/skifree-three"'));
+assert.ok(html.includes('src="/assets/github-invertocat.svg"'));
+assert.ok(html.includes('id="copy-result-button"'));
+assert.ok(source.includes("navigator.clipboard?.writeText"));
 for (const englishText of ["High Scores", "Freestyle", "The Yeti got you", "Failed to load"]) {
   assert.ok(source.includes(englishText), `missing English translation: ${englishText}`);
 }

@@ -1098,11 +1098,9 @@ async function verifyYetiChase(page) {
     game.updateCourseObjects(dt);
     const catchupTrackingSpeed = firstWave[0]?.speed;
     game.player.speed = 3.85;
-    for (let tick = 0; tick < 360 && firstWave[0]?.chasePhase !== "locked"; tick += 1) {
-      game.player.y += game.player.speed * dt * 60;
-      game.updateCourseObjects(dt);
-      if (firstWave[0]) runSprites.add(firstWave[0].spriteId);
-    }
+    firstWave[0].y = game.player.y - game.viewport.height * 0.1;
+    game.updateCourseObjects(dt);
+    if (firstWave[0]) runSprites.add(firstWave[0].spriteId);
     const lockedSpeed = firstWave[0]?.speed;
     const lockedPhase = firstWave[0]?.chasePhase;
 
@@ -1116,6 +1114,8 @@ async function verifyYetiChase(page) {
     );
     const secondWaveSize = game.yetiWaveSize;
     const secondWaveSpeeds = secondWave.map((monster) => monster.speed);
+    const secondWaveStaticSpeeds = secondWave.map((monster) => monster.staticSpeed);
+    const secondWaveMinimumSpeeds = secondWave.map((monster) => monster.minimumStaticSpeed);
     const secondWavePhases = secondWave.map((monster) => monster.chasePhase);
     const secondWaveXs = secondWave.map((monster) => monster.x);
     const secondWaveTrackers = secondWave.map((monster) => monster.tracksPlayerX);
@@ -1151,6 +1151,8 @@ async function verifyYetiChase(page) {
       secondWaveSize,
       secondWaveCount: secondWave.length,
       secondWaveSpeeds,
+      secondWaveStaticSpeeds,
+      secondWaveMinimumSpeeds,
       secondWavePhases,
       secondWaveXs,
       secondWaveXsAfterSteering,
@@ -1158,6 +1160,8 @@ async function verifyYetiChase(page) {
       viewportWidth: game.viewport.width,
       thirdWaveSize,
       thirdWaveCount,
+      thirdWaveSpeeds: thirdWave.map((monster) => monster.speed),
+      thirdWaveStaticSpeeds: thirdWave.map((monster) => monster.staticSpeed),
       minimumYetiSpeed: slowPlayerWave[0].speed
     };
   });
@@ -1169,10 +1173,10 @@ async function verifyYetiChase(page) {
     result.firstWaveSize !== 1 || result.firstSpawnPhase !== "catchup"
     || Math.abs(result.firstSpawnSpeed - 4.8125) > 0.0001 || result.catchupTrackingSpeed !== 7.5
   ) {
-    throw new Error(`first yeti wave did not spawn at 1.25x player speed: ${JSON.stringify(result)}`);
+    throw new Error(`first yeti wave did not track 1.25x player speed in real time: ${JSON.stringify(result)}`);
   }
   if (result.lockedPhase !== "locked" || result.lockedSpeed !== 4) {
-    throw new Error(`yeti did not lock to the player's midpoint speed: ${JSON.stringify(result)}`);
+    throw new Error(`yeti speed changed when locking onto the player: ${JSON.stringify(result)}`);
   }
   if (result.runSprites.some((spriteId) => spriteId < 68 || spriteId > 75)) {
     throw new Error(`yeti run animation used non-run sprites: ${JSON.stringify(result.runSprites)}`);
@@ -1180,8 +1184,12 @@ async function verifyYetiChase(page) {
   if (
     result.secondWaveSize !== 2 || result.secondWaveCount !== 2
     || result.secondWaveSpeeds.some((speed) => speed !== 12.5)
+    || result.secondWaveStaticSpeeds.some((speed) => Math.abs(speed - 6) > 0.0001)
+    || result.secondWaveMinimumSpeeds.some((speed) => Math.abs(speed - 4) > 0.0001)
     || result.secondWavePhases.some((phase) => phase !== "catchup")
-    || Math.abs(result.secondWaveXs[1] - result.secondWaveXs[0]) < result.viewportWidth * 0.7
+    || Math.abs(
+      Math.abs(result.secondWaveXs[1] - result.secondWaveXs[0]) - result.viewportWidth * 0.5
+    ) > 0.0001
     || result.secondWaveTrackers.filter(Boolean).length !== 1
   ) {
     throw new Error(`escaping the first yeti did not spawn a two-yeti wave: ${JSON.stringify(result)}`);
@@ -1194,7 +1202,11 @@ async function verifyYetiChase(page) {
   ) {
     throw new Error(`only one yeti should track the player horizontally: ${JSON.stringify(result)}`);
   }
-  if (result.thirdWaveSize !== 3 || result.thirdWaveCount !== 3) {
+  if (
+    result.thirdWaveSize !== 3
+    || result.thirdWaveCount !== 3
+    || result.thirdWaveStaticSpeeds.some((speed) => Math.abs(speed - 9) > 0.0001)
+  ) {
     throw new Error(`yeti waves did not continue growing: ${JSON.stringify(result)}`);
   }
   if (result.minimumYetiSpeed !== 4) {

@@ -19,6 +19,16 @@
           <span aria-hidden="true">🇧🇷</span>
         </button>
       </nav>
+      <a
+        id="github-link"
+        href="https://github.com/BurguerJohn/skifree-three"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="GitHub: SkiFree Three.js"
+        title="GitHub: SkiFree Three.js"
+      >
+        <img src="/assets/github-invertocat.svg" alt="" aria-hidden="true" />
+      </a>
       <section id="hud" aria-label="Status do SkiFree">
         <div class="hud-title">SkiFree</div>
         <dl>
@@ -32,7 +42,15 @@
       <section id="course-result-card" aria-label="Recordes" hidden>
         <h2 data-i18n="records">Recordes</h2>
         <div id="course-result-name"></div>
+        <section id="course-result-summary" aria-labelledby="course-result-summary-title">
+          <h3 id="course-result-summary-title" data-i18n="summaryTitle">Resumo da prova</h3>
+          <p id="personal-best" hidden></p>
+          <dl id="course-result-stats"></dl>
+        </section>
+        <h3 class="ranking-title" data-i18n="rankingTitle">Classificação</h3>
         <ol id="course-result-list"></ol>
+        <button id="copy-result-button" type="button" data-i18n="copyResult">Copiar resultado</button>
+        <p id="copy-result-status" role="status" aria-live="polite"></p>
         <div class="result-hint" data-i18n="resultHint">Toque na tela ou pressione Enter para continuar</div>
       </section>
       <div id="load-card" data-i18n="loading">Carregando</div>

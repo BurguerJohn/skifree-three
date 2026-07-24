@@ -75,3 +75,18 @@ export function rankCourseResults(existing, value, higherWins, limit = 10) {
     rank: ranked.indexOf(entry) >= 0 ? ranked.indexOf(entry) + 1 : -1
   };
 }
+
+export function isNearMissPass(
+  playerX,
+  objectX,
+  playerWidth,
+  objectWidth,
+  margin
+) {
+  const values = [playerX, objectX, playerWidth, objectWidth, margin];
+  if (!values.every(Number.isFinite) || playerWidth <= 0 || objectWidth <= 0 || margin < 0) {
+    return false;
+  }
+  const clearance = Math.abs(playerX - objectX) - (playerWidth + objectWidth) / 2;
+  return clearance >= 0 && clearance <= margin;
+}
